@@ -119,7 +119,7 @@ $(GINKGO): $(TOOLS_DIR)/go.mod
 	cd $(TOOLS_DIR) && go build -tags=tools -o $(BIN_DIR)/ginkgo github.com/onsi/ginkgo/ginkgo
 
 .PHONY: binaries
-binaries: manager clusterawsadm ## Builds and installs all binaries
+binaries: manager clusterawsadm manager-eks-control-plane ## Builds and installs all binaries
 
 .PHONY: manager
 manager: ## Build manager binary.
@@ -128,6 +128,11 @@ manager: ## Build manager binary.
 .PHONY: clusterawsadm
 clusterawsadm: ## Build clusterawsadm binary.
 	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/clusterawsadm ./cmd/clusterawsadm
+
+.PHONY: manager-eks-control-plane
+manager-eks-control-plane: ## Build eks control plane manager
+	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/eks-control-plane-manager ./controlplane/eks
+
 
 ## --------------------------------------
 ## Tooling Binaries
@@ -178,7 +183,12 @@ generate: ## Generate code
 	$(MAKE) generate-manifests
 
 .PHONY: generate-go
-generate-go: $(CONTROLLER_GEN) $(CONVERSION_GEN) $(MOCKGEN) ## Runs Go related generate targets
+generate-go: ## Runs Go related generate targets
+	$(MAKE) generate-go-core
+	$(MAKE) generate-go-eks-control-plane
+
+.PHONY: generate-go-core
+generate-go-core: $(CONTROLLER_GEN) $(CONVERSION_GEN) 
 	$(CONTROLLER_GEN) \
 		paths=./api/... \
 		object:headerFile=./hack/boilerplate/boilerplate.generatego.txt
@@ -189,8 +199,19 @@ generate-go: $(CONTROLLER_GEN) $(CONVERSION_GEN) $(MOCKGEN) ## Runs Go related g
 		--go-header-file=./hack/boilerplate/boilerplate.generatego.txt
 	go generate ./...
 
+PHONY: generate-go-eks-control-plane
+generate-go-eks-control-plane:$(CONTROLLER_GEN) $(CONVERSION_GEN)
+	$(CONTROLLER_GEN) \
+		object:headerFile=./hack/boilerplate/boilerplate.generatego.txt \
+		paths=./controlplane/eks/api/...
+
 .PHONY: generate-manifests
-generate-manifests: $(CONTROLLER_GEN) ## Generate manifests e.g. CRD, RBAC etc.
+generate-manifests:
+	$(MAKE) generate-core-manifests
+	$(MAKE) generate-eks-control-plane-manifests
+
+.PHONY: generate-core-manifests
+generate-core-manifests: $(CONTROLLER_GEN) ## Generate manifests for the core provider e.g. CRD, RBAC etc.
 	$(CONTROLLER_GEN) \
 		paths=./api/... \
 		crd:crdVersions=v1 \
@@ -201,6 +222,19 @@ generate-manifests: $(CONTROLLER_GEN) ## Generate manifests e.g. CRD, RBAC etc.
 		paths=./controllers/... \
 		output:rbac:dir=$(RBAC_ROOT) \
 		rbac:roleName=manager-role
+
+.PHONY: generate-eks-control-plane-manifests
+generate-eks-control-plane-manifests: $(CONTROLLER_GEN) ## Generate manifests for the EKS control plane e.g. CRD, RBAC etc.
+	$(CONTROLLER_GEN) \
+		paths=./controlplane/eks/api/... \
+		paths=./controlplane/eks/controllers/... \
+		crd:crdVersions=v1 \
+		rbac:roleName=manager-role \
+		output:crd:dir=./controlplane/eks/config/crd/bases \
+		output:rbac:dir=./controlplane/eks/config/rbac \
+		output:webhook:dir=./controlplane/eks/config/webhook \
+		webhook
+
 
 ## --------------------------------------
 ## Docker
