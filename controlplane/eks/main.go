@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -137,7 +137,7 @@ func setupReconcilers(mgr ctrl.Manager) {
 		return
 	}
 
-	if err := (&ekscontrollers.EKSControlPlaneReconciler{
+	if err := (&ekscontrollers.EksControlPlaneReconciler{
 		Client:   mgr.GetClient(),
 		Log:      ctrl.Log.WithName("controllers").WithName("EKSControlPlane"),
 		Recorder: mgr.GetEventRecorderFor("ekscontrolplane-controller"),
@@ -157,10 +157,6 @@ func setupReconcilers(mgr ctrl.Manager) {
 		os.Exit(1)
 	}
 }*/
-
-func concurrency(c int) controller.Options {
-	return controller.Options{MaxConcurrentReconciles: c}
-}
 
 // newClientFunc returns a client reads from cache and write directly to the server
 // this avoid get unstructured object directly from the server

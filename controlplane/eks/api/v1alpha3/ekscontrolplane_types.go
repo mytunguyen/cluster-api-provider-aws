@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,8 +27,8 @@ const (
 	EKSControlPlaneFinalizer = "eks.controlplane.cluster.x-k8s.io"
 )
 
-// EKSControlPlaneSpec defines the desired state of EKSControlPlaneSpec
-type EKSControlPlaneSpec struct {
+// EksControlPlaneSpec defines the desired state of EksControlPlane
+type EksControlPlaneSpec struct {
 	// NetworkSpec encapsulates all things related to AWS network.
 	NetworkSpec infrav1.NetworkSpec `json:"networkSpec,omitempty"`
 
@@ -63,8 +63,8 @@ type EncryptionConfig struct {
 	Resources []*string `json:"resources,omitempty"`
 }
 
-// EKSControlPlaneStatus defines the observed state of EKSControlPlane
-type EKSControlPlaneStatus struct {
+// EksControlPlaneStatus defines the observed state of EksControlPlane
+type EksControlPlaneStatus struct {
 	Network infrav1.Network `json:"network,omitempty"`
 
 	// Initialized denotes whether or not the control plane has the
@@ -90,31 +90,31 @@ type EKSControlPlaneStatus struct {
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:path=ekscontrolplanes,shortName=kcp,scope=Namespaced,categories=cluster-api
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:path=ekscontrolplanes,shortName=ecp,scope=Namespaced,categories=cluster-api
 // +kubebuilder:storageversion
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=".status.ready",description="EKSControlPlane API Server is ready to receive requests"
 // +kubebuilder:printcolumn:name="Initialized",type=boolean,JSONPath=".status.initialized",description="This denotes whether or not the control plane has the uploaded kubeadm-config configmap"
 
-// EKSControlPlane is the schema for the EKSControlPlane API
-type EKSControlPlane struct {
+// EksControlPlane is the Schema for the ekscontrolplanes API
+type EksControlPlane struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   EKSControlPlaneSpec   `json:"spec,omitempty"`
-	Status EKSControlPlaneStatus `json:"status,omitempty"`
+	Spec   EksControlPlaneSpec   `json:"spec,omitempty"`
+	Status EksControlPlaneStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// EKSControlPlaneList represents a list of EKSControlPlane
-type EKSControlPlaneList struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	Items []EKSControlPlane `json:"items"`
+// EksControlPlaneList contains a list of EksControlPlane
+type EksControlPlaneList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []EksControlPlane `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&EKSControlPlane{}, &EKSControlPlane{})
+	SchemeBuilder.Register(&EksControlPlane{}, &EksControlPlaneList{})
 }

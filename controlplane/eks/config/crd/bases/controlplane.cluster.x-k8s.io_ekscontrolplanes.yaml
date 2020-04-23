@@ -6,17 +6,17 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.2.8
   creationTimestamp: null
-  name: ekscontrolplanes.ekscontrolplane.cluster.x-k8s.io
+  name: ekscontrolplanes.controlplane.cluster.x-k8s.io
 spec:
-  group: ekscontrolplane.cluster.x-k8s.io
+  group: controlplane.cluster.x-k8s.io
   names:
     categories:
     - cluster-api
-    kind: EKSControlPlane
-    listKind: EKSControlPlaneList
+    kind: EksControlPlane
+    listKind: EksControlPlaneList
     plural: ekscontrolplanes
     shortNames:
-    - kcp
+    - ecp
     singular: ekscontrolplane
   scope: Namespaced
   versions:
@@ -33,7 +33,7 @@ spec:
     name: v1alpha3
     schema:
       openAPIV3Schema:
-        description: EKSControlPlane is the schema for the EKSControlPlane API
+        description: EksControlPlane is the Schema for the ekscontrolplanes API
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
@@ -48,7 +48,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: EKSControlPlaneSpec defines the desired state of EKSControlPlaneSpec
+            description: EksControlPlaneSpec defines the desired state of EksControlPlane
             properties:
               additionalTags:
                 additionalProperties:
@@ -190,7 +190,7 @@ spec:
             - version
             type: object
           status:
-            description: EKSControlPlaneStatus defines the observed state of EKSControlPlane
+            description: EksControlPlaneStatus defines the observed state of EksControlPlane
             properties:
               failureMessage:
                 description: ErrorMessage indicates that there is a terminal problem

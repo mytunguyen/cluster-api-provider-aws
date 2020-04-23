@@ -1,11 +1,10 @@
 /*
-Copyright 2020 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,9 +13,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha3 contains API Schema definitions for the eks v1alpha3 API group
+// Package v1alpha3 contains API Schema definitions for the eks controlplane v1alpha3 API group
 // +kubebuilder:object:generate=true
-// +groupName=ekscontrolplane.cluster.x-k8s.io
+// +groupName=controlplane.cluster.x-k8s.io
 package v1alpha3
 
 import (
@@ -26,7 +25,7 @@ import (
 
 var (
 	// GroupVersion is group version used to register these objects
-	GroupVersion = schema.GroupVersion{Group: "ekscontrolplane.cluster.x-k8s.io", Version: "v1alpha3"}
+	GroupVersion = schema.GroupVersion{Group: "controlplane.cluster.x-k8s.io", Version: "v1alpha3"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}

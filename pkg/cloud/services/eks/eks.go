@@ -50,10 +50,10 @@ func (s *Service) DeleteCluster() error {
 
 	err = s.deleteClusterAndWait(cluster)
 	if err != nil {
-		record.Warnf(s.scope.EKSControlPlane, "FailedDeleteEKSCluster", "Failed to delete EKS cluster %s: %v", cluster.Name, err)
+		record.Warnf(s.scope.EksControlPlane, "FailedDeleteEKSCluster", "Failed to delete EKS cluster %s: %v", cluster.Name, err)
 		return errors.Wrap(err, "unable to delete EKS cluster")
 	}
-	record.Eventf(s.scope.EKSControlPlane, "SuccessfulDeleteEKSCluster", "Deleted EKS Cluster %s", cluster.Name)
+	record.Eventf(s.scope.EksControlPlane, "SuccessfulDeleteEKSCluster", "Deleted EKS Cluster %s", cluster.Name)
 
 	return nil
 }
@@ -83,14 +83,16 @@ func (s *Service) deleteClusterAndWait(cluster *eks.Cluster) error {
 
 func (s *Service) createCluster() (*eks.Cluster, error) {
 	input := &eks.CreateClusterInput{
-		Name:               &s.scope.EKSControlPlane.Name,
+		Name:               &s.scope.EksControlPlane.Name,
 		ClientRequestToken: aws.String(uuid.New().String()),
-		Version:            aws.String(s.scope.EKSControlPlane.Spec.Version),
+		Version:            aws.String(s.scope.EksControlPlane.Spec.Version),
 		Logging:            &eks.Logging{},
 		ResourcesVpcConfig: &eks.VpcConfigRequest{},
-		RoleArn:            aws.String(s.scope.EKSControlPlane.Spec.RoleArn),
+		RoleArn:            aws.String(s.scope.EksControlPlane.Spec.RoleArn),
 		//Tags: aws.StringMap(),
 	}
+
+	return nil, nil
 }
 
 func (s *Service) describeEKSCluster() (*eks.Cluster, error) {

@@ -1,0 +1,20 @@
+# permissions to do viewer ekscontrolplanes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ekscontrolplane-viewer-role
+rules:
+- apiGroups:
+  - controlplane.controlplane.cluster.x-k8s.io
+  resources:
+  - ekscontrolplanes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - controlplane.controlplane.cluster.x-k8s.io
+  resources:
+  - ekscontrolplanes/status
+  verbs:
+  - get

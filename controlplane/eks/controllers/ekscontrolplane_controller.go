@@ -1,11 +1,10 @@
 /*
-Copyright 2020 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,17 +40,8 @@ import (
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/services/eks"
 )
 
-// +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch
-// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;patch
-// +kubebuilder:rbac:groups=core,resources=configmaps,namespace=kube-system,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups=rbac,resources=roles,namespace=kube-system,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups=rbac,resources=rolebindings,namespace=kube-system,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io;bootstrap.cluster.x-k8s.io;controlplane.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch;create;update;patch;delete
-
-// EKSControlPlaneReconciler will reconcile a EKSControlPlane object
-type EKSControlPlaneReconciler struct {
+// EksControlPlaneReconciler reconciles a EksControlPlane object
+type EksControlPlaneReconciler struct {
 	client.Client
 	Log      logr.Logger
 	Recorder record.EventRecorder
@@ -60,12 +50,12 @@ type EKSControlPlaneReconciler struct {
 	controller controller.Controller
 }
 
-func (r *EKSControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, options controller.Options) error {
+func (r *EksControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, options controller.Options) error {
 	c, err := ctrl.NewControllerManagedBy(mgr).
-		For(&controlplanev1.EKSControlPlane{}).
+		For(&controlplanev1.EksControlPlane{}).
 		Watches(
 			&source.Kind{Type: &clusterv1.Cluster{}},
-			&handler.EnqueueRequestsFromMapFunc{ToRequests: handler.ToRequestsFunc(r.ClusterToEKSControlPlane)},
+			&handler.EnqueueRequestsFromMapFunc{ToRequests: handler.ToRequestsFunc(r.ClusterToEksControlPlane)},
 		).
 		WithOptions(options).
 		Build(r)
@@ -77,17 +67,15 @@ func (r *EKSControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, options c
 	r.scheme = mgr.GetScheme()
 	r.controller = c
 
-	//if r.managementCluster == nil {
-	//	r.managementCluster = &internal.Management{Client: r.Client}
-	//}
-
 	return nil
 }
 
-// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=ekscontrolplane,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=ekscontrolplanes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=controlplane.cluster.x-k8s.io,resources=ekscontrolplanes/status,verbs=get;update;patch
 
-func (r *EKSControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result, reterr error) {
+func (r *EksControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result, reterr error) {
 	logger := r.Log.WithValues("namespace", req.Namespace, "eksControlPlane", req.Name)
 	ctx := context.Background()
 
@@ -141,15 +129,18 @@ func (r *EKSControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result
 	}
 
 	// Handle normal reconciliation loop.
-	return r.reconcileNormal(ctx, cluster, ecp)
+	return r.reconcileNormal(ctx, managedScope)
 }
 
-func (r *EKSControlPlaneReconciler) reconcileNormal(ctx context.Context, cluster *clusterv1.Cluster, ekp *controlplanev1.EKSControlPlane) (res ctrl.Result, reterr error) {
+func (r *EKSControlPlaneReconciler) reconcileNormal(ctx context.Context, managedScope *scope.ManagedControlPlaneScope) (res ctrl.Result, reterr error) {
+
+	controllerutil.AddFinalizer(managedScope.EKSControlPlane, controlplanev1.EKSControlPlaneFinalizer)
+
 	return
 }
 
-func (r *EKSControlPlaneReconciler) reconcileDelete(ctx context.Context, managedScope *scope.ManagedControlPlaneScope) (_ ctrl.Result, reterr error) {
-	managedScope.Info("Reconciling EKSClusterPlane delete")
+func (r *EksControlPlaneReconciler) reconcileDelete(ctx context.Context, managedScope *scope.ManagedControlPlaneScope) (_ ctrl.Result, reterr error) {
+	managedScope.Info("Reconciling EksClusterPlane delete")
 
 	ekssvc := eks.NewService(managedScope)
 	controlPlane := managedScope.EKSControlPlane
@@ -161,17 +152,15 @@ func (r *EKSControlPlaneReconciler) reconcileDelete(ctx context.Context, managed
 	controllerutil.RemoveFinalizer(controlPlane, controlplanev1.EKSControlPlaneFinalizer)
 
 	return reconcile.Result{}, nil
+}
 
+func (r *EksControlPlaneReconciler) reconcilHealth(ctx context.Context, cluster *clusterv1.Cluster, ekp *controlplanev1.EKSControlPlane) (_ ctrl.Result, reterr error) {
 	return
 }
 
-func (r *EKSControlPlaneReconciler) reconcilHealth(ctx context.Context, cluster *clusterv1.Cluster, ekp *controlplanev1.EKSControlPlane) (_ ctrl.Result, reterr error) {
-	return
-}
-
-// ClusterToEKSControlPlane is a handler.ToRequestsFunc to be used to enqueue requests for reconciliation
+// ClusterToEksControlPlane is a handler.ToRequestsFunc to be used to enqueue requests for reconciliation
 // for EKSControlPlane based on updates to a Cluster.
-func (r *EKSControlPlaneReconciler) ClusterToEKSControlPlane(o handler.MapObject) []ctrl.Request {
+func (r *EksControlPlaneReconciler) ClusterToEksControlPlane(o handler.MapObject) []ctrl.Request {
 	c, ok := o.Object.(*clusterv1.Cluster)
 	if !ok {
 		r.Log.Error(nil, fmt.Sprintf("Expected a Cluster but got a %T", o.Object))
