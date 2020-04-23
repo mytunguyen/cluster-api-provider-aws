@@ -19,26 +19,26 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
-	capierrors "sigs.k8s.io/cluster-api/errors"
 	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	controlplanev1 "sigs.k8s.io/cluster-api-provider-aws/controlplane/eks/api/v1alpha3"
+	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/scope"
+	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/services/eks"
 )
 
 // +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;patch
@@ -52,11 +52,12 @@ import (
 
 // EKSControlPlaneReconciler will reconcile a EKSControlPlane object
 type EKSControlPlaneReconciler struct {
-	Client     client.Client
-	Log        logr.Logger
+	client.Client
+	Log      logr.Logger
+	Recorder record.EventRecorder
+
 	scheme     *runtime.Scheme
 	controller controller.Controller
-	recorder   record.EventRecorder
 }
 
 func (r *EKSControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, options controller.Options) error {
@@ -75,7 +76,6 @@ func (r *EKSControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, options c
 
 	r.scheme = mgr.GetScheme()
 	r.controller = c
-	r.recorder = mgr.GetEventRecorderFor("kubeadm-control-plane-controller")
 
 	//if r.managementCluster == nil {
 	//	r.managementCluster = &internal.Management{Client: r.Client}
@@ -83,6 +83,9 @@ func (r *EKSControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, options c
 
 	return nil
 }
+
+// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=ekscontrolplane,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
 
 func (r *EKSControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result, reterr error) {
 	logger := r.Log.WithValues("namespace", req.Namespace, "eksControlPlane", req.Name)
@@ -107,58 +110,34 @@ func (r *EKSControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result
 		logger.Info("Cluster Controller has not yet set OwnerRef")
 		return ctrl.Result{}, nil
 	}
-	logger = logger.WithValues("cluster", cluster.Name)
 
 	if util.IsPaused(cluster, ecp) {
 		logger.Info("Reconciliation is paused for this object")
 		return ctrl.Result{}, nil
 	}
 
-	// Wait for the cluster infrastructure to be ready before creating machines
-	if !cluster.Status.InfrastructureReady {
-		return ctrl.Result{}, nil
-	}
+	logger = logger.WithValues("cluster", cluster.Name)
 
-	// Initialize the patch helper.
-	patchHelper, err := patch.NewHelper(ecp, r.Client)
+	managedScope, err := scope.NewManagedControlPlaneScope(scope.ManagedControlPlaneScopeParams{
+		Client:          r.Client,
+		Logger:          logger,
+		Cluster:         cluster,
+		EKSControlPlane: ecp,
+	})
 	if err != nil {
-		logger.Error(err, "Failed to configure the patch helper")
-		return ctrl.Result{Requeue: true}, nil
+		return reconcile.Result{}, errors.Errorf("failed to create scope: %+v", err)
 	}
 
+	// Always close the scope
 	defer func() {
-		if requeueErr, ok := errors.Cause(reterr).(capierrors.HasRequeueAfterError); ok {
-			if res.RequeueAfter == 0 {
-				res.RequeueAfter = requeueErr.GetRequeueAfter()
-				reterr = nil
-			}
-		}
-
-		// Always attempt to update status.
-		if err := r.updateStatus(ctx, cluster, ecp); err != nil {
-			logger.Error(err, "Failed to update EKSControlPlane Status")
-			reterr = kerrors.NewAggregate([]error{reterr, err})
-		}
-
-		// Always attempt to Patch the *EKSControlPlane object and status after each reconciliation.
-		if err := patchHelper.Patch(ctx, ecp); err != nil {
-			logger.Error(err, "Failed to patch *EKSControlPlane")
-			reterr = kerrors.NewAggregate([]error{reterr, err})
-		}
-
-		// TODO: remove this as soon as we have a proper remote cluster cache in place.
-		// Make KCP to requeue in case status is not ready, so we can check for node status without waiting for a full resync (by default 10 minutes).
-		// Only requeue if we are not going in exponential backoff due to error, or if we are not already re-queueing, or if the object has a deletion timestamp.
-		if reterr == nil && !res.Requeue && !(res.RequeueAfter > 0) && ecp.ObjectMeta.DeletionTimestamp.IsZero() {
-			if !ecp.Status.Ready {
-				res = ctrl.Result{RequeueAfter: 20 * time.Second}
-			}
+		if err := managedScope.Close(); err != nil && reterr == nil {
+			reterr = err
 		}
 	}()
 
 	if !ecp.ObjectMeta.DeletionTimestamp.IsZero() {
 		// Handle deletion reconciliation loop.
-		return r.reconcileDelete(ctx, cluster, ecp)
+		return r.reconcileDelete(ctx, managedScope)
 	}
 
 	// Handle normal reconciliation loop.
@@ -169,7 +148,20 @@ func (r *EKSControlPlaneReconciler) reconcileNormal(ctx context.Context, cluster
 	return
 }
 
-func (r *EKSControlPlaneReconciler) reconcileDelete(ctx context.Context, cluster *clusterv1.Cluster, ekp *controlplanev1.EKSControlPlane) (_ ctrl.Result, reterr error) {
+func (r *EKSControlPlaneReconciler) reconcileDelete(ctx context.Context, managedScope *scope.ManagedControlPlaneScope) (_ ctrl.Result, reterr error) {
+	managedScope.Info("Reconciling EKSClusterPlane delete")
+
+	ekssvc := eks.NewService(managedScope)
+	controlPlane := managedScope.EKSControlPlane
+
+	if err := ekssvc.DeleteCluster(); err != nil {
+		return reconcile.Result{}, errors.Wrapf(err, "error deleteing EKS cluster for EKS control plane %s/%s", managedScope.Namespace, managedScope.Name)
+	}
+
+	controllerutil.RemoveFinalizer(controlPlane, controlplanev1.EKSControlPlaneFinalizer)
+
+	return reconcile.Result{}, nil
+
 	return
 }
 

@@ -29,6 +29,9 @@ const (
 
 // EKSControlPlaneSpec defines the desired state of EKSControlPlaneSpec
 type EKSControlPlaneSpec struct {
+	// NetworkSpec encapsulates all things related to AWS network.
+	NetworkSpec infrav1.NetworkSpec `json:"networkSpec,omitempty"`
+
 	// Version defines the desired Kubernetes version.
 	// +kubebuilder:validation:MinLength:=2
 	// +kubebuilder:validation:Pattern:=^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-0-9a-zA-Z_\.+]*)?$

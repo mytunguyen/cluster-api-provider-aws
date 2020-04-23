@@ -1,0 +1,38 @@
+---
+apiVersion: cluster.x-k8s.io/v1alpha3
+kind: Cluster
+metadata:
+  name: "${CLUSTER_NAME}"
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks: ["192.168.0.0/16"]
+  controlPlaneRef:
+    kind: EKSControlPlane
+    apiVersion: ekscontrolplane.cluster.x-k8s.io/v1alpha3
+    name: "${CLUSTER_NAME}-control-plane"
+---
+kind: EKSControlPlane
+apiVersion: ekscontrolplane.cluster.x-k8s.io/v1alpha3
+metadata:
+  name: "${CLUSTER_NAME}-control-plane"
+spec:
+  version: "${KUBERNETES_VERSION}"
+  region: "${AWS_REGION}"
+  roleArn: abcrolearn
+  # TODO: encryptionConfig:
+  # TODO: logging:
+  networkSpec:
+    vpc:
+      id:
+      cidrBlock:
+      internetGatewayId:
+      tags:
+    subnets:
+      - id:
+        cidrBlock:
+        availabilityZone:
+        isPublic:
+        routeTableId:
+        natGatewayId:
+        tags:

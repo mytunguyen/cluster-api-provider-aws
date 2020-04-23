@@ -38,7 +38,9 @@ import (
 
 	controlplanev1 "sigs.k8s.io/cluster-api-provider-aws/controlplane/eks/api/v1alpha3"
 	ekscontrollers "sigs.k8s.io/cluster-api-provider-aws/controlplane/eks/controllers"
+	"sigs.k8s.io/cluster-api-provider-aws/pkg/record"
 	"sigs.k8s.io/cluster-api-provider-aws/version"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 )
 
 var (
@@ -61,50 +63,19 @@ var (
 	leaderElectionLeaseDuration time.Duration
 	leaderElectionRenewDeadline time.Duration
 	leaderElectionRetryPeriod   time.Duration
+	leaderElectionNamespace     string
 	watchNamespace              string
 	profilerAddress             string
 	eksControlPlaneConcurrency  int
 	syncPeriod                  time.Duration
 	webhookPort                 int
+	healthAddr                  string
 )
-
-// InitFlags initializes the flags.
-func InitFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&metricsAddr, "metrics-addr", ":8080",
-		"The address the metric endpoint binds to.")
-
-	fs.BoolVar(&enableLeaderElection, "enable-leader-election", false,
-		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
-
-	fs.DurationVar(&leaderElectionLeaseDuration, "leader-election-lease-duration", 15*time.Second,
-		"Interval at which non-leader candidates will wait to force acquire leadership (duration string)")
-
-	fs.DurationVar(&leaderElectionRenewDeadline, "leader-election-renew-deadline", 10*time.Second,
-		"Duration that the acting master will retry refreshing leadership before giving up (duration string)")
-
-	fs.DurationVar(&leaderElectionRetryPeriod, "leader-election-retry-period", 2*time.Second,
-		"Duration the LeaderElector clients should wait between tries of actions (duration string)")
-
-	fs.StringVar(&watchNamespace, "namespace", "",
-		"Namespace that the controller watches to reconcile cluster-api objects. If unspecified, the controller watches for cluster-api objects across all namespaces.")
-
-	fs.StringVar(&profilerAddress, "profiler-address", "",
-		"Bind address to expose the pprof profiler (e.g. localhost:6060)")
-
-	fs.IntVar(&eksControlPlaneConcurrency, "elscontrolplane-concurrency", 10,
-		"Number of EKS control planes to process simultaneously")
-
-	fs.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
-		"The minimum interval at which watched resources are reconciled (e.g. 15m)")
-
-	fs.IntVar(&webhookPort, "webhook-port", 0,
-		"Webhook Server port, disabled by default. When enabled, the manager will only work as webhook server, no reconcilers are installed.")
-}
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
-	InitFlags(pflag.CommandLine)
+	initFlags(pflag.CommandLine)
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 
@@ -118,27 +89,42 @@ func main() {
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
-		LeaderElection:     enableLeaderElection,
-		LeaderElectionID:   "eks-control-plane-manager-leader-election-capi",
-		LeaseDuration:      &leaderElectionLeaseDuration,
-		RenewDeadline:      &leaderElectionRenewDeadline,
-		RetryPeriod:        &leaderElectionRetryPeriod,
-		Namespace:          watchNamespace,
-		SyncPeriod:         &syncPeriod,
-		NewClient:          newClientFunc,
-		Port:               webhookPort,
+		Scheme:                 scheme,
+		MetricsBindAddress:     metricsAddr,
+		LeaderElection:         enableLeaderElection,
+		LeaderElectionID:       "eks-control-plane-manager-leader-election-capi",
+		LeaseDuration:          &leaderElectionLeaseDuration,
+		RenewDeadline:          &leaderElectionRenewDeadline,
+		RetryPeriod:            &leaderElectionRetryPeriod,
+		Namespace:              watchNamespace,
+		SyncPeriod:             &syncPeriod,
+		NewClient:              newClientFunc,
+		Port:                   webhookPort,
+		HealthProbeBindAddress: healthAddr,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "unable to start eks control plance manager")
 		os.Exit(1)
 	}
+
+	// Initialize event recorder.
+	record.InitFromRecorder(mgr.GetEventRecorderFor("eks-control-plane"))
 
 	setupReconcilers(mgr)
 	//setupWebhooks(mgr)
 
 	// +kubebuilder:scaffold:builder
+
+	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to create ready check")
+		os.Exit(1)
+	}
+
+	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+		setupLog.Error(err, "unable to create health check")
+		os.Exit(1)
+	}
+
 	setupLog.Info("starting manager", "version", version.Get().String())
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
@@ -152,9 +138,10 @@ func setupReconcilers(mgr ctrl.Manager) {
 	}
 
 	if err := (&ekscontrollers.EKSControlPlaneReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("EKSControlPlane"),
-	}).SetupWithManager(mgr, concurrency(eksControlPlaneConcurrency)); err != nil {
+		Client:   mgr.GetClient(),
+		Log:      ctrl.Log.WithName("controllers").WithName("EKSControlPlane"),
+		Recorder: mgr.GetEventRecorderFor("ekscontrolplane-controller"),
+	}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: eksControlPlaneConcurrency}); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EKSControlPlane")
 		os.Exit(1)
 	}
@@ -190,4 +177,65 @@ func newClientFunc(cache cache.Cache, config *rest.Config, options client.Option
 		Writer:       c,
 		StatusClient: c,
 	}, nil
+}
+
+func initFlags(fs *pflag.FlagSet) {
+	flag.StringVar(
+		&metricsAddr,
+		"metrics-addr",
+		":8080",
+		"The address the metric endpoint binds to.",
+	)
+
+	flag.BoolVar(
+		&enableLeaderElection,
+		"enable-leader-election",
+		false,
+		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.",
+	)
+
+	flag.StringVar(
+		&watchNamespace,
+		"namespace",
+		"",
+		"Namespace that the controller watches to reconcile cluster-api objects. If unspecified, the controller watches for cluster-api objects across all namespaces.",
+	)
+
+	flag.StringVar(
+		&leaderElectionNamespace,
+		"leader-election-namespace",
+		"",
+		"Namespace that the controller performs leader election in. If unspecified, the controller will discover which namespace it is running in.",
+	)
+
+	flag.StringVar(
+		&profilerAddress,
+		"profiler-address",
+		"",
+		"Bind address to expose the pprof profiler (e.g. localhost:6060)",
+	)
+
+	flag.IntVar(&eksControlPlaneConcurrency,
+		"eks-control-plane-concurrency",
+		5,
+		"Number of EKSControlPlane to process simultaneously",
+	)
+
+	flag.DurationVar(&syncPeriod,
+		"sync-period",
+		10*time.Minute,
+		"The minimum interval at which watched resources are reconciled (e.g. 15m)",
+	)
+
+	flag.IntVar(&webhookPort,
+		"webhook-port",
+		0,
+		"Webhook Server port, disabled by default. When enabled, the manager will only work as webhook server, no reconcilers are installed.",
+	)
+
+	flag.StringVar(&healthAddr,
+		"health-addr",
+		":9440",
+		"The address the health endpoint binds to.",
+	)
 }
