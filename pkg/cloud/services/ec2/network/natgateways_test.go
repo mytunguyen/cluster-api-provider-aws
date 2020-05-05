@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ec2
+package network
 
 import (
 	"testing"
@@ -316,7 +316,7 @@ func TestReconcileNatGateways(t *testing.T) {
 
 			tc.expect(ec2Mock.EXPECT())
 
-			s := NewService(clusterScope)
+			s := NewService(clusterScope.NetworkScope)
 			if err := s.reconcileNatGateways(); err != nil {
 				t.Fatalf("got an unexpected error: %v", err)
 			}

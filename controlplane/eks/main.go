@@ -111,7 +111,7 @@ func main() {
 	record.InitFromRecorder(mgr.GetEventRecorderFor("eks-control-plane"))
 
 	setupReconcilers(mgr)
-	//setupWebhooks(mgr)
+	setupWebhooks(mgr)
 
 	// +kubebuilder:scaffold:builder
 
@@ -147,16 +147,16 @@ func setupReconcilers(mgr ctrl.Manager) {
 	}
 }
 
-/*func setupWebhooks(mgr ctrl.Manager) {
+func setupWebhooks(mgr ctrl.Manager) {
 	if webhookPort == 0 {
 		return
 	}
 
-	if err := (&controlplanev1.EKSControlPlane{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "EKSControlPlane")
+	if err := (&controlplanev1.EksControlPlane{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "EksControlPlane")
 		os.Exit(1)
 	}
-}*/
+}
 
 // newClientFunc returns a client reads from cache and write directly to the server
 // this avoid get unstructured object directly from the server

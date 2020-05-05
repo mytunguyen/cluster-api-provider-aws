@@ -18,13 +18,12 @@ package v1alpha3
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
-	"sigs.k8s.io/cluster-api/errors"
 )
 
 const (
-	EKSControlPlaneFinalizer = "eks.controlplane.cluster.x-k8s.io"
+	// EksControlPlaneFinalizer allows teh controller to cldean up resources on delete
+	EksControlPlaneFinalizer = "eks.controlplane.cluster.x-k8s.io"
 )
 
 // EksControlPlaneSpec defines the desired state of EksControlPlane
@@ -53,6 +52,10 @@ type EksControlPlaneSpec struct {
 	// ones added by default.
 	// +optional
 	AdditionalTags infrav1.Tags `json:"additionalTags,omitempty"`
+
+	// Private indicates if the control plane should be private
+	// +optional
+	Private *bool `json:"private,omitempty"`
 }
 
 // EncryptionConfig specifies the encryption configuration for the EKS clsuter
@@ -69,19 +72,19 @@ type EksControlPlaneStatus struct {
 
 	// Initialized denotes whether or not the control plane has the
 	// uploaded kubeadm-config configmap.
-	// +optional
+	// +kubebuilder:default=false
 	Initialized bool `json:"initialized"`
 
 	// Ready denotes that the KubeadmControlPlane API Server is ready to
 	// receive requests.
-	// +optional
+	// +kubebuilder:default=false
 	Ready bool `json:"ready"`
 
 	// FailureReason indicates that there is a terminal problem reconciling the
 	// state, and will be set to a token value suitable for
 	// programmatic interpretation.
 	// +optional
-	FailureReason errors.KubeadmControlPlaneStatusError `json:"failureReason,omitempty"`
+	//FailureReason errors.KubeadmControlPlaneStatusError `json:"failureReason,omitempty"`
 
 	// ErrorMessage indicates that there is a terminal problem reconciling the
 	// state, and will be set to a descriptive error message.

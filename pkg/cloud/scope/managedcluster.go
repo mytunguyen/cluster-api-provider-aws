@@ -27,6 +27,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/klogr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
 	controlplanev1 "sigs.k8s.io/cluster-api-provider-aws/controlplane/eks/api/v1alpha3"
@@ -107,6 +108,12 @@ func NewManagedControlPlaneScope(params ManagedControlPlaneScopeParams) (*Manage
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init patch helper")
 	}
+
+	networkScope, err := newNetworkScopeFromManagedControlPlane(&params)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create network scope from cluster scope")
+	}
+
 	return &ManagedControlPlaneScope{
 		Logger:          params.Logger,
 		client:          params.Client,
@@ -114,7 +121,28 @@ func NewManagedControlPlaneScope(params ManagedControlPlaneScopeParams) (*Manage
 		Cluster:         params.Cluster,
 		EksControlPlane: params.EksControlPlane,
 		patchHelper:     helper,
+		NetworkScope:    networkScope,
 	}, nil
+}
+
+func newNetworkScopeFromManagedControlPlane(controlplaneParams *ManagedControlPlaneScopeParams) (*ClusterNetworkScope, error) {
+	params := &ClusterNetworkScopeParams{
+		Client:         controlplaneParams.Client,
+		Logger:         controlplaneParams.Logger,
+		Cluster:        controlplaneParams.Cluster,
+		AWSClients:     controlplaneParams.AWSClients,
+		Target:         interface{}(controlplaneParams.EksControlPlane).(runtime.Object),
+		NetworkSpec:    &controlplaneParams.EksControlPlane.Spec.NetworkSpec,
+		NetworkStatus:  &controlplaneParams.EksControlPlane.Status.Network,
+		Region:         controlplaneParams.EksControlPlane.Spec.Region,
+		AdditionalTags: controlplaneParams.EksControlPlane.Labels,
+	}
+
+	if controlplaneParams.Cluster.Spec.ClusterNetwork != nil && controlplaneParams.Cluster.Spec.ClusterNetwork.APIServerPort != nil {
+		params.APIServerPort = controlplaneParams.Cluster.Spec.ClusterNetwork.APIServerPort
+	}
+
+	return NewClusterNetworkScope(*params)
 }
 
 // ManagedControlPlaneScope defines the basic context for an actuator to operate upon.
@@ -126,6 +154,8 @@ type ManagedControlPlaneScope struct {
 	AWSClients
 	Cluster         *clusterv1.Cluster
 	EksControlPlane *controlplanev1.EksControlPlane
+
+	NetworkScope *ClusterNetworkScope
 }
 
 // Network returns the control plane network object.

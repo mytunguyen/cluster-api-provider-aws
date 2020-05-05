@@ -80,7 +80,7 @@ func (r *EksControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result
 	ctx := context.Background()
 
 	// Get the control plane instance
-	ecp := &controlplanev1.EKSControlPlane{}
+	ecp := &controlplanev1.EksControlPlane{}
 	if err := r.Client.Get(ctx, req.NamespacedName, ecp); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -104,13 +104,18 @@ func (r *EksControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result
 		return ctrl.Result{}, nil
 	}
 
+	// Wait for the cluster infrastructure to be ready before creating machines
+	if !cluster.Status.InfrastructureReady {
+		return ctrl.Result{}, nil
+	}
+
 	logger = logger.WithValues("cluster", cluster.Name)
 
 	managedScope, err := scope.NewManagedControlPlaneScope(scope.ManagedControlPlaneScopeParams{
 		Client:          r.Client,
 		Logger:          logger,
 		Cluster:         cluster,
-		EKSControlPlane: ecp,
+		EksControlPlane: ecp,
 	})
 	if err != nil {
 		return reconcile.Result{}, errors.Errorf("failed to create scope: %+v", err)
@@ -132,29 +137,41 @@ func (r *EksControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl.Result
 	return r.reconcileNormal(ctx, managedScope)
 }
 
-func (r *EKSControlPlaneReconciler) reconcileNormal(ctx context.Context, managedScope *scope.ManagedControlPlaneScope) (res ctrl.Result, reterr error) {
+func (r *EksControlPlaneReconciler) reconcileNormal(ctx context.Context, managedScope *scope.ManagedControlPlaneScope) (res ctrl.Result, reterr error) {
+	managedScope.Info("Reconciling EksControlPlane")
 
-	controllerutil.AddFinalizer(managedScope.EKSControlPlane, controlplanev1.EKSControlPlaneFinalizer)
+	// TODO: check failed???
 
-	return
+	controllerutil.AddFinalizer(managedScope.EksControlPlane, controlplanev1.EksControlPlaneFinalizer)
+	if err := managedScope.PatchObject(); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	ekssvc := eks.NewService(managedScope)
+
+	if err := ekssvc.ReconcileCluster(); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, nil
 }
 
 func (r *EksControlPlaneReconciler) reconcileDelete(ctx context.Context, managedScope *scope.ManagedControlPlaneScope) (_ ctrl.Result, reterr error) {
 	managedScope.Info("Reconciling EksClusterPlane delete")
 
 	ekssvc := eks.NewService(managedScope)
-	controlPlane := managedScope.EKSControlPlane
+	controlPlane := managedScope.EksControlPlane
 
 	if err := ekssvc.DeleteCluster(); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "error deleteing EKS cluster for EKS control plane %s/%s", managedScope.Namespace, managedScope.Name)
 	}
 
-	controllerutil.RemoveFinalizer(controlPlane, controlplanev1.EKSControlPlaneFinalizer)
+	controllerutil.RemoveFinalizer(controlPlane, controlplanev1.EksControlPlaneFinalizer)
 
 	return reconcile.Result{}, nil
 }
 
-func (r *EksControlPlaneReconciler) reconcilHealth(ctx context.Context, cluster *clusterv1.Cluster, ekp *controlplanev1.EKSControlPlane) (_ ctrl.Result, reterr error) {
+func (r *EksControlPlaneReconciler) reconcilHealth(ctx context.Context, cluster *clusterv1.Cluster, ekp *controlplanev1.EksControlPlane) (_ ctrl.Result, reterr error) {
 	return
 }
 

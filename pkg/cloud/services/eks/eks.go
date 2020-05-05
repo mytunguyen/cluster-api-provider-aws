@@ -24,6 +24,9 @@ import (
 
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/awserrors"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/record"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
+	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/services/wait"
 )
 
 func (s *Service) ReconcileCluster() error {
@@ -33,6 +36,8 @@ func (s *Service) ReconcileCluster() error {
 	if awserrors.IsNotFound(err) {
 		cluster, err = s.createCluster()
 	}
+
+	s.scope.Info("Create cluster: %q", cluster.Arn)
 
 	return nil
 }
@@ -82,17 +87,68 @@ func (s *Service) deleteClusterAndWait(cluster *eks.Cluster) error {
 }
 
 func (s *Service) createCluster() (*eks.Cluster, error) {
+	//TODO: handle subnets properly
+	subnets := make([]*string, 0)
+	if s.scope.EksControlPlane.Spec.Private != nil && *s.scope.EksControlPlane.Spec.Private == true {
+		// Private control plane
+		sns := s.scope.Subnets().FilterPrivate()
+		if len(sns) == 0 {
+			return nil, awserrors.NewFailedDependency(
+				errors.Errorf("failed to create eks control plane %q, no private subnets available", s.scope.Name()),
+			)
+		}
+		for _, subnet := range sns {
+			subnets = append(subnets, &subnet.ID)
+		}
+	} else {
+		// Public control plane
+		sns := s.scope.Subnets().FilterPublic()
+		if len(sns) == 0 {
+			return nil, awserrors.NewFailedDependency(
+				errors.Errorf("failed to create eks control plane %q, no public subnets available", s.scope.Name()),
+			)
+		}
+		for _, subnet := range sns {
+			subnets = append(subnets, &subnet.ID)
+		}
+	}
+
+	// Make sure to use the MachineScope here to get the merger of AWSCluster and AWSMachine tags
+	additionalTags := s.scope.AdditionalTags()
+	// Set the cloud provider tag
+	additionalTags[infrav1.ClusterAWSCloudProviderTagKey(s.scope.Name())] = string(infrav1.ResourceLifecycleOwned)
+	tags := make(map[string]*string)
+	for k, v := range additionalTags {
+		tags[k] = &v
+	}
+
 	input := &eks.CreateClusterInput{
 		Name:               &s.scope.EksControlPlane.Name,
 		ClientRequestToken: aws.String(uuid.New().String()),
 		Version:            aws.String(s.scope.EksControlPlane.Spec.Version),
 		Logging:            &eks.Logging{},
-		ResourcesVpcConfig: &eks.VpcConfigRequest{},
-		RoleArn:            aws.String(s.scope.EksControlPlane.Spec.RoleArn),
-		//Tags: aws.StringMap(),
+		ResourcesVpcConfig: &eks.VpcConfigRequest{
+			SubnetIds: subnets,
+		},
+		RoleArn: aws.String(s.scope.EksControlPlane.Spec.RoleArn),
+		Tags:    tags,
 	}
 
-	return nil, nil
+	var out *eks.CreateClusterOutput
+	var err error
+	if err := wait.WaitForWithRetryable(wait.NewBackoff(), func() (bool, error) {
+		if out, err = s.scope.EKS.CreateCluster(input); err != nil {
+			return false, err
+		}
+		return true, nil
+	}, awserrors.ResourceNotFound); err != nil {
+		record.Warnf(s.scope.EksControlPlane, "FaiedCreateEKSCluster", "Failed to create a new EKS cluster: %v", err)
+		return nil, errors.Wrapf(err, "failed to create EKS cluster")
+	}
+
+	record.Eventf(s.scope.EksControlPlane, "SuccessfulCreateEKSCluster", "Created a new EKS cluster %q", s.scope.Name())
+
+	return out.Cluster, nil
 }
 
 func (s *Service) describeEKSCluster() (*eks.Cluster, error) {
