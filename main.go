@@ -18,12 +18,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"math/rand"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"time"
 
+	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	cgrecord "k8s.io/client-go/tools/record"
@@ -32,6 +34,7 @@ import (
 	infrav1alpha2 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha2"
 	infrav1alpha3 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
 	"sigs.k8s.io/cluster-api-provider-aws/controllers"
+	"sigs.k8s.io/cluster-api-provider-aws/feature"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/record"
 	"sigs.k8s.io/cluster-api-provider-aws/version"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
@@ -54,90 +57,94 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
-func main() {
-	rand.Seed(time.Now().UnixNano())
+var (
+	metricsAddr             string
+	enableLeaderElection    bool
+	leaderElectionNamespace string
+	watchNamespace          string
+	profilerAddress         string
+	awsClusterConcurrency   int
+	awsMachineConcurrency   int
+	syncPeriod              time.Duration
+	webhookPort             int
+	healthAddr              string
+)
 
-	klog.InitFlags(nil)
-
-	var (
-		metricsAddr             string
-		enableLeaderElection    bool
-		leaderElectionNamespace string
-		watchNamespace          string
-		profilerAddress         string
-		awsClusterConcurrency   int
-		awsMachineConcurrency   int
-		syncPeriod              time.Duration
-		webhookPort             int
-		healthAddr              string
-	)
-
-	flag.StringVar(
+func initFlags(fs *pflag.FlagSet) {
+	fs.StringVar(
 		&metricsAddr,
 		"metrics-addr",
 		":8080",
 		"The address the metric endpoint binds to.",
 	)
 
-	flag.BoolVar(
+	fs.BoolVar(
 		&enableLeaderElection,
 		"enable-leader-election",
 		false,
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.",
 	)
 
-	flag.StringVar(
+	fs.StringVar(
 		&watchNamespace,
 		"namespace",
 		"",
 		"Namespace that the controller watches to reconcile cluster-api objects. If unspecified, the controller watches for cluster-api objects across all namespaces.",
 	)
 
-	flag.StringVar(
+	fs.StringVar(
 		&leaderElectionNamespace,
 		"leader-election-namespace",
 		"",
 		"Namespace that the controller performs leader election in. If unspecified, the controller will discover which namespace it is running in.",
 	)
 
-	flag.StringVar(
+	fs.StringVar(
 		&profilerAddress,
 		"profiler-address",
 		"",
 		"Bind address to expose the pprof profiler (e.g. localhost:6060)",
 	)
 
-	flag.IntVar(&awsClusterConcurrency,
+	fs.IntVar(&awsClusterConcurrency,
 		"awscluster-concurrency",
 		5,
 		"Number of AWSClusters to process simultaneously",
 	)
 
-	flag.IntVar(&awsMachineConcurrency,
+	fs.IntVar(&awsMachineConcurrency,
 		"awsmachine-concurrency",
 		10,
 		"Number of AWSMachines to process simultaneously",
 	)
 
-	flag.DurationVar(&syncPeriod,
+	fs.DurationVar(&syncPeriod,
 		"sync-period",
 		10*time.Minute,
 		"The minimum interval at which watched resources are reconciled (e.g. 15m)",
 	)
 
-	flag.IntVar(&webhookPort,
+	fs.IntVar(&webhookPort,
 		"webhook-port",
 		0,
 		"Webhook Server port, disabled by default. When enabled, the manager will only work as webhook server, no reconcilers are installed.",
 	)
 
-	flag.StringVar(&healthAddr,
+	fs.StringVar(&healthAddr,
 		"health-addr",
 		":9440",
 		"The address the health endpoint binds to.",
 	)
+	feature.MutableGates.AddFlag(fs)
+}
 
-	flag.Parse()
+func main() {
+	rand.Seed(time.Now().UnixNano())
+
+	klog.InitFlags(nil)
+	initFlags(pflag.CommandLine)
+	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
 
 	ctrl.SetLogger(klogr.New())
 
@@ -178,6 +185,8 @@ func main() {
 	// Initialize event recorder.
 	record.InitFromRecorder(mgr.GetEventRecorderFor("aws-controller"))
 
+	setupLog.V(1).Info(fmt.Sprintf("%+v\n", feature.Gates))
+
 	if webhookPort == 0 {
 		if err = (&controllers.AWSMachineReconciler{
 			Client:   mgr.GetClient(),
@@ -194,6 +203,16 @@ func main() {
 		}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: awsClusterConcurrency}); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "AWSCluster")
 			os.Exit(1)
+		}
+		if feature.Gates.Enabled(feature.EKS) {
+			if err = (&controllers.AWSManagedClusterReconciler{
+				Client:   mgr.GetClient(),
+				Log:      ctrl.Log.WithName("controllers").WithName("AWSManagedCluster"),
+				Recorder: mgr.GetEventRecorderFor("awsmanagedcluster-controller"),
+			}).SetupWithManager(mgr, controller.Options{MaxConcurrentReconciles: awsClusterConcurrency}); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "AWSManagedCluster")
+				os.Exit(1)
+			}
 		}
 	} else {
 		if err = (&infrav1alpha3.AWSMachineTemplate{}).SetupWebhookWithManager(mgr); err != nil {
@@ -219,6 +238,9 @@ func main() {
 		if err = (&infrav1alpha3.AWSClusterList{}).SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "AWSClusterList")
 			os.Exit(1)
+		}
+		if feature.Gates.Enabled(feature.EKS) {
+			//TODO enable webhooks for EKS
 		}
 	}
 	// +kubebuilder:scaffold:builder

@@ -21,7 +21,6 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/aws/aws-sdk-go/service/eks"
 	"github.com/aws/aws-sdk-go/service/elb"
 	"github.com/aws/aws-sdk-go/service/resourcegroupstaggingapi"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
@@ -30,191 +29,199 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/klogr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
-	controlplanev1 "sigs.k8s.io/cluster-api-provider-aws/controlplane/eks/api/v1alpha3"
 	"sigs.k8s.io/cluster-api-provider-aws/version"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ManagedControlPlaneScopeParams defines the input parameters used to create a new Scope.
-type ManagedControlPlaneScopeParams struct {
+// ManagedClusterScopeParams defines the input parameters used to create a new Scope.
+type ManagedClusterScopeParams struct {
 	AWSClients
-	Client          client.Client
-	Logger          logr.Logger
-	Cluster         *clusterv1.Cluster
-	EksControlPlane *controlplanev1.EksControlPlane
+	Client            client.Client
+	Logger            logr.Logger
+	Cluster           *clusterv1.Cluster
+	AWSManagedCluster *infrav1.AWSManagedCluster
 }
 
-// NewManagedControlPlaneScope creates a new Scope from the supplied parameters.
+// NewManagedClusterScope creates a new Scope from the supplied parameters.
 // This is meant to be called for each reconcile iteration.
-func NewManagedControlPlaneScope(params ManagedControlPlaneScopeParams) (*ManagedControlPlaneScope, error) {
+func NewManagedClusterScope(params ManagedClusterScopeParams) (*ManagedClusterScope, error) {
 	if params.Cluster == nil {
 		return nil, errors.New("failed to generate new scope from nil Cluster")
 	}
-	if params.EksControlPlane == nil {
-		return nil, errors.New("failed to generate new scope from nil EksControlPlane")
+	if params.AWSManagedCluster == nil {
+		return nil, errors.New("failed to generate new scope from nil AWSManagedCluster")
 	}
 
 	if params.Logger == nil {
 		params.Logger = klogr.New()
 	}
 
-	session, err := sessionForRegion(params.EksControlPlane.Spec.Region)
+	session, err := sessionForRegion(params.AWSManagedCluster.Spec.Region)
 	if err != nil {
 		return nil, errors.Errorf("failed to create aws session: %v", err)
 	}
 
 	userAgentHandler := request.NamedHandler{
 		Name: "capa/user-agent",
-		Fn:   request.MakeAddToUserAgentHandler("eks.control-plane.x-k8s.io", version.Get().String()),
+		Fn:   request.MakeAddToUserAgentHandler("aws.cluster.x-k8s.io", version.Get().String()),
 	}
 
 	if params.AWSClients.EC2 == nil {
 		ec2Client := ec2.New(session)
 		ec2Client.Handlers.Build.PushFrontNamed(userAgentHandler)
-		ec2Client.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.EksControlPlane))
+		ec2Client.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.AWSManagedCluster))
 		params.AWSClients.EC2 = ec2Client
 	}
 
 	if params.AWSClients.ELB == nil {
 		elbClient := elb.New(session)
 		elbClient.Handlers.Build.PushFrontNamed(userAgentHandler)
-		elbClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.EksControlPlane))
+		elbClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.AWSManagedCluster))
 		params.AWSClients.ELB = elbClient
 	}
 
 	if params.AWSClients.ResourceTagging == nil {
 		resourceTagging := resourcegroupstaggingapi.New(session)
 		resourceTagging.Handlers.Build.PushFrontNamed(userAgentHandler)
-		resourceTagging.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.EksControlPlane))
+		resourceTagging.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.AWSManagedCluster))
 		params.AWSClients.ResourceTagging = resourceTagging
 	}
 
 	if params.AWSClients.SecretsManager == nil {
 		sClient := secretsmanager.New(session)
-		sClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.EksControlPlane))
+		sClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.AWSManagedCluster))
 		params.AWSClients.SecretsManager = sClient
 	}
 
-	if params.AWSClients.EKS == nil {
-		eksClient := eks.New(session)
-		eksClient.Handlers.Build.PushFrontNamed(userAgentHandler)
-		eksClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.EksControlPlane))
-		params.AWSClients.EKS = eksClient
-	}
-
-	helper, err := patch.NewHelper(params.EksControlPlane, params.Client)
+	helper, err := patch.NewHelper(params.AWSManagedCluster, params.Client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init patch helper")
 	}
 
-	networkScope, err := newNetworkScopeFromManagedControlPlane(&params)
+	networkScope, err := newNetworkScopeFromManagedCluster(&params)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create network scope from cluster scope")
+		return nil, errors.Wrap(err, "failed to create network scope from managed cluster scope")
 	}
 
-	return &ManagedControlPlaneScope{
-		Logger:          params.Logger,
-		client:          params.Client,
-		AWSClients:      params.AWSClients,
-		Cluster:         params.Cluster,
-		EksControlPlane: params.EksControlPlane,
-		patchHelper:     helper,
-		NetworkScope:    networkScope,
+	return &ManagedClusterScope{
+		Logger:            params.Logger,
+		client:            params.Client,
+		AWSClients:        params.AWSClients,
+		Cluster:           params.Cluster,
+		AWSManagedCluster: params.AWSManagedCluster,
+		patchHelper:       helper,
+		NetworkScope:      networkScope,
 	}, nil
 }
 
-func newNetworkScopeFromManagedControlPlane(controlplaneParams *ManagedControlPlaneScopeParams) (*ClusterNetworkScope, error) {
+func newNetworkScopeFromManagedCluster(clusterParams *ManagedClusterScopeParams) (*ClusterNetworkScope, error) {
 	params := &ClusterNetworkScopeParams{
-		Client:         controlplaneParams.Client,
-		Logger:         controlplaneParams.Logger,
-		Cluster:        controlplaneParams.Cluster,
-		AWSClients:     controlplaneParams.AWSClients,
-		Target:         interface{}(controlplaneParams.EksControlPlane).(runtime.Object),
-		NetworkSpec:    &controlplaneParams.EksControlPlane.Spec.NetworkSpec,
-		NetworkStatus:  &controlplaneParams.EksControlPlane.Status.Network,
-		Region:         controlplaneParams.EksControlPlane.Spec.Region,
-		AdditionalTags: controlplaneParams.EksControlPlane.Labels,
+		Client:         clusterParams.Client,
+		Logger:         clusterParams.Logger,
+		Cluster:        clusterParams.Cluster,
+		Target:         interface{}(clusterParams.AWSManagedCluster).(runtime.Object),
+		NetworkSpec:    &clusterParams.AWSManagedCluster.Spec.NetworkSpec,
+		NetworkStatus:  &clusterParams.AWSManagedCluster.Status.Network,
+		Region:         clusterParams.AWSManagedCluster.Spec.Region,
+		AWSClients:     clusterParams.AWSClients,
+		AdditionalTags: clusterParams.AWSManagedCluster.Labels,
 	}
 
-	if controlplaneParams.Cluster.Spec.ClusterNetwork != nil && controlplaneParams.Cluster.Spec.ClusterNetwork.APIServerPort != nil {
-		params.APIServerPort = controlplaneParams.Cluster.Spec.ClusterNetwork.APIServerPort
+	if clusterParams.Cluster.Spec.ClusterNetwork != nil && clusterParams.Cluster.Spec.ClusterNetwork.APIServerPort != nil {
+		params.APIServerPort = clusterParams.Cluster.Spec.ClusterNetwork.APIServerPort
 	}
 
 	return NewClusterNetworkScope(*params)
 }
 
-// ManagedControlPlaneScope defines the basic context for an actuator to operate upon.
-type ManagedControlPlaneScope struct {
+// ManagedClusterScope defines the basic context for an actuator to operate upon.
+type ManagedClusterScope struct {
 	logr.Logger
 	client      client.Client
 	patchHelper *patch.Helper
 
 	AWSClients
-	Cluster         *clusterv1.Cluster
-	EksControlPlane *controlplanev1.EksControlPlane
+	Cluster           *clusterv1.Cluster
+	AWSManagedCluster *infrav1.AWSManagedCluster
 
 	NetworkScope *ClusterNetworkScope
 }
 
 // Network returns the control plane network object.
-func (s *ManagedControlPlaneScope) Network() *infrav1.Network {
-	return &s.EksControlPlane.Status.Network
+func (s *ManagedClusterScope) Network() *infrav1.Network {
+	return &s.AWSManagedCluster.Status.Network
 }
 
 // VPC returns the control plane VPC.
-func (s *ManagedControlPlaneScope) VPC() *infrav1.VPCSpec {
-	return &s.EksControlPlane.Spec.NetworkSpec.VPC
+func (s *ManagedClusterScope) VPC() *infrav1.VPCSpec {
+	return &s.AWSManagedCluster.Spec.NetworkSpec.VPC
 }
 
 // Subnets returns the control plane subnets.
-func (s *ManagedControlPlaneScope) Subnets() infrav1.Subnets {
-	return s.EksControlPlane.Spec.NetworkSpec.Subnets
+func (s *ManagedClusterScope) Subnets() infrav1.Subnets {
+	return s.AWSManagedCluster.Spec.NetworkSpec.Subnets
 }
 
 // SecurityGroups returns the control plane security groups as a map, it creates the map if empty.
-func (s *ManagedControlPlaneScope) SecurityGroups() map[infrav1.SecurityGroupRole]infrav1.SecurityGroup {
-	return s.EksControlPlane.Status.Network.SecurityGroups
+func (s *ManagedClusterScope) SecurityGroups() map[infrav1.SecurityGroupRole]infrav1.SecurityGroup {
+	return s.AWSManagedCluster.Status.Network.SecurityGroups
 }
 
 // Name returns the cluster name.
-func (s *ManagedControlPlaneScope) Name() string {
+func (s *ManagedClusterScope) Name() string {
 	return s.Cluster.Name
 }
 
 // Namespace returns the cluster namespace.
-func (s *ManagedControlPlaneScope) Namespace() string {
+func (s *ManagedClusterScope) Namespace() string {
 	return s.Cluster.Namespace
 }
 
 // Region returns the cluster region.
-func (s *ManagedControlPlaneScope) Region() string {
-	return s.EksControlPlane.Spec.Region
+func (s *ManagedClusterScope) Region() string {
+	return s.AWSManagedCluster.Spec.Region
 }
 
 // ListOptionsLabelSelector returns a ListOptions with a label selector for clusterName.
-func (s *ManagedControlPlaneScope) ListOptionsLabelSelector() client.ListOption {
+func (s *ManagedClusterScope) ListOptionsLabelSelector() client.ListOption {
 	return client.MatchingLabels(map[string]string{
 		clusterv1.ClusterLabelName: s.Cluster.Name,
 	})
 }
 
 // PatchObject persists the control plane configuration and status.
-func (s *ManagedControlPlaneScope) PatchObject() error {
-	return s.patchHelper.Patch(context.TODO(), s.EksControlPlane)
+func (s *ManagedClusterScope) PatchObject() error {
+	return s.patchHelper.Patch(context.TODO(), s.AWSManagedCluster)
 }
 
 // Close closes the current scope persisting the control plane configuration and status.
-func (s *ManagedControlPlaneScope) Close() error {
+func (s *ManagedClusterScope) Close() error {
 	return s.PatchObject()
 }
 
 // AdditionalTags returns AdditionalTags from the scope's EksControlPlane. The returned value will never be nil.
-func (s *ManagedControlPlaneScope) AdditionalTags() infrav1.Tags {
-	if s.EksControlPlane.Spec.AdditionalTags == nil {
-		s.EksControlPlane.Spec.AdditionalTags = infrav1.Tags{}
+func (s *ManagedClusterScope) AdditionalTags() infrav1.Tags {
+	if s.AWSManagedCluster.Spec.AdditionalTags == nil {
+		s.AWSManagedCluster.Spec.AdditionalTags = infrav1.Tags{}
 	}
 
-	return s.EksControlPlane.Spec.AdditionalTags.DeepCopy()
+	return s.AWSManagedCluster.Spec.AdditionalTags.DeepCopy()
+}
+
+// APIServerPort returns the APIServerPort to use when creating the load balancer.
+func (s *ManagedClusterScope) APIServerPort() int32 {
+	if s.Cluster.Spec.ClusterNetwork != nil && s.Cluster.Spec.ClusterNetwork.APIServerPort != nil {
+		return *s.Cluster.Spec.ClusterNetwork.APIServerPort
+	}
+	return 6443
+}
+
+// SetFailureDomain sets the infrastructure provider failure domain key to the spec given as input.
+func (s *ManagedClusterScope) SetFailureDomain(id string, spec clusterv1.FailureDomainSpec) {
+	if s.AWSManagedCluster.Status.FailureDomains == nil {
+		s.AWSManagedCluster.Status.FailureDomains = make(clusterv1.FailureDomains)
+	}
+	s.AWSManagedCluster.Status.FailureDomains[id] = spec
 }

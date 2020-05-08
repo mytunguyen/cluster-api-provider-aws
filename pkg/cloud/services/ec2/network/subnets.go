@@ -29,6 +29,7 @@ import (
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/filter"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/tags"
+	"sigs.k8s.io/cluster-api-provider-aws/pkg/internal/cidr"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/record"
 )
 
@@ -40,12 +41,17 @@ const (
 	externalLoadBalancerTag = "kubernetes.io/role/elb"
 )
 
-func (s *Service) reconcileSubnets() error {
+// SubnetDefaulter is a function type that allows implemeting different methods for creating the defaults subnets
+//TODO: this name isn't the best
+type SubnetDefaulter func(existingVPCSubnets infrav1.Subnets, clusterSubnets infrav1.Subnets) (infrav1.Subnets, error)
+
+func (s *Service) reconcileSubnets(defaulterFn SubnetDefaulter) error {
 	s.scope.V(2).Info("Reconciling subnets")
 
 	subnets := s.scope.Subnets()
 	defer func() {
-		//s.scope.Subnets = subnets
+		// s.scope.AWSCluster.Spec.NetworkSpec.Subnets = subnets
+		s.scope.NetworkSpec.Subnets = subnets
 	}()
 
 	// Describe subnets in the vpc.
@@ -54,38 +60,7 @@ func (s *Service) reconcileSubnets() error {
 		return err
 	}
 
-	// If the subnets are empty, populate the slice with the default configuration.
-	// Adds a single private and public subnet in the first available zone.
-	if len(existing) < 2 && len(subnets) < 2 {
-		zones, err := s.getAvailableZones()
-		if err != nil {
-			return err
-		}
-
-		if len(subnets.FilterPrivate()) == 0 {
-			if s.scope.VPC().IsUnmanaged(s.scope.Name()) {
-				return errors.New("expected at least one private subnet available for use, got 0")
-			}
-
-			subnets = append(subnets, &infrav1.SubnetSpec{
-				CidrBlock:        defaultPrivateSubnetCidr,
-				AvailabilityZone: zones[0],
-				IsPublic:         false,
-			})
-		}
-
-		if len(subnets.FilterPublic()) == 0 {
-			if s.scope.VPC().IsUnmanaged(s.scope.Name()) {
-				return errors.New("expected at least one public subnet available for use, got 0")
-			}
-
-			subnets = append(subnets, &infrav1.SubnetSpec{
-				CidrBlock:        defaultPublicSubnetCidr,
-				AvailabilityZone: zones[0],
-				IsPublic:         true,
-			})
-		}
-	}
+	subnets, err = defaulterFn(existing, subnets)
 
 LoopExisting:
 	for i := range existing {
@@ -144,6 +119,115 @@ LoopExisting:
 
 	s.scope.V(2).Info("Subnets available", "subnets", subnets)
 	return nil
+}
+
+// simplePublicPrivateSubnets will add a single private and public subnet in the first available zone.
+func (s *Service) simplePublicPrivateSubnets(existingVPCSubnets infrav1.Subnets, clusterSubnets infrav1.Subnets) (infrav1.Subnets, error) {
+	// If the subnets are empty, populate the slice with the default configuration.
+	if len(existingVPCSubnets) < 2 && len(clusterSubnets) < 2 {
+		zones, err := s.getAvailableZones()
+		if err != nil {
+			return nil, err
+		}
+
+		if len(clusterSubnets.FilterPrivate()) == 0 {
+			if s.scope.VPC().IsUnmanaged(s.scope.Name()) {
+				return nil, errors.New("expected at least one private subnet available for use, got 0")
+			}
+
+			clusterSubnets = append(clusterSubnets, &infrav1.SubnetSpec{
+				CidrBlock:        defaultPrivateSubnetCidr,
+				AvailabilityZone: zones[0],
+				IsPublic:         false,
+			})
+		}
+
+		if len(clusterSubnets.FilterPublic()) == 0 {
+			if s.scope.VPC().IsUnmanaged(s.scope.Name()) {
+				return nil, errors.New("expected at least one public subnet available for use, got 0")
+			}
+
+			clusterSubnets = append(clusterSubnets, &infrav1.SubnetSpec{
+				CidrBlock:        defaultPublicSubnetCidr,
+				AvailabilityZone: zones[0],
+				IsPublic:         true,
+			})
+		}
+	}
+	return clusterSubnets, nil
+}
+
+// multiAZPublicPrivateSubnets will add public and private subnets for each AZ
+func (s *Service) multiAZPublicPrivateSubnets(existingVPCSubnets infrav1.Subnets, clusterSubnets infrav1.Subnets) (infrav1.Subnets, error) {
+	zones, err := s.getAvailableZones()
+	if err != nil {
+		return nil, err
+	}
+
+	// If we have an unmanaged VPC then there should be 4 existing subnets, 2 public in different AZs, 2 private in different AZs
+	// and these should map to subnets specified in the VPC
+	// TODO: this is a big assumption, if you use an umanaged VPC then you must create the subnets and specify them
+	if s.scope.VPC().IsUnmanaged(s.scope.Name()) {
+		if len(clusterSubnets) < 4 {
+			return nil, errors.Errorf("expected at least one private and one public subnet in 2 different AZs to be specified (4 subnets in total), got %d", len(existingVPCSubnets))
+		}
+		if len(existingVPCSubnets) <= len(clusterSubnets) {
+			return nil, errors.Errorf("expected the existing vpc subnets (%d) to be greater than or equal to specified subnets (%d)", len(existingVPCSubnets), len(clusterSubnets))
+		}
+		privateSubnetZones := clusterSubnets.FilterPrivate().GetUniqueZones()
+		if len(privateSubnetZones) < 2 {
+			return nil, errors.Errorf("expected at least 2 different zones for the private subnets, got %d", len(privateSubnetZones))
+		}
+		for _, privateZone := range privateSubnetZones {
+			if foundSubnet := existingVPCSubnets.FilterPrivate().FilterByZone(privateZone); foundSubnet == nil {
+				return nil, errors.Errorf("couldn't find existing private subnet for AZ %s", privateZone)
+			}
+		}
+		publicSubnetZones := clusterSubnets.FilterPublic().GetUniqueZones()
+		if len(publicSubnetZones) < 2 {
+			return nil, errors.Errorf("expected at least 2 different zones for the public subnets, got %d", len(publicSubnetZones))
+		}
+		for _, publicZone := range publicSubnetZones {
+			if foundSubnet := existingVPCSubnets.FilterPublic().FilterByZone(publicZone); foundSubnet == nil {
+				return nil, errors.Errorf("couldn't find existing private subnet for AZ %s", publicZone)
+			}
+		}
+		return clusterSubnets, nil
+	}
+
+	// If this is a managed VPC (i.e. create by capa) and their are subnets specified then we need at
+	// 2 subnets in 2 different AZs
+	if len(clusterSubnets) > 0 {
+		specifiedZones := clusterSubnets.GetUniqueZones()
+		if len(specifiedZones) < 2 {
+			return nil, errors.Errorf("if specifying subnets you must include subnets for at least 2 differenr AZs")
+		}
+		return clusterSubnets, nil
+	}
+
+	// If this is a managed vpc and their are no subnets specified then we'll create them
+	numSubnets := len(zones) * 2
+	subnetCIDRs, err := cidr.SplitIntoSubnets(s.scope.VPC().CidrBlock, numSubnets)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed splitting VPC CIDR into subnets")
+	}
+
+	for i := 0; i < len(zones); i++ {
+		zone := zones[i]
+
+		clusterSubnets = append(clusterSubnets, &infrav1.SubnetSpec{
+			CidrBlock:        subnetCIDRs[i].String(),
+			AvailabilityZone: zone,
+			IsPublic:         true,
+		})
+		clusterSubnets = append(clusterSubnets, &infrav1.SubnetSpec{
+			CidrBlock:        subnetCIDRs[i+3].String(),
+			AvailabilityZone: zone,
+			IsPublic:         false,
+		})
+	}
+
+	return clusterSubnets, nil
 }
 
 func (s *Service) deleteSubnets() error {

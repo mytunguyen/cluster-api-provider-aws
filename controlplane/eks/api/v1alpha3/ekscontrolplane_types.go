@@ -28,16 +28,10 @@ const (
 
 // EksControlPlaneSpec defines the desired state of EksControlPlane
 type EksControlPlaneSpec struct {
-	// NetworkSpec encapsulates all things related to AWS network.
-	NetworkSpec infrav1.NetworkSpec `json:"networkSpec,omitempty"`
-
 	// Version defines the desired Kubernetes version.
 	// +kubebuilder:validation:MinLength:=2
 	// +kubebuilder:validation:Pattern:=^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-0-9a-zA-Z_\.+]*)?$
 	Version string `json:"version"`
-
-	// The AWS Region the EKS cluster lives in.
-	Region string `json:"region,omitempty"`
 
 	// RoleArn specifies the ARN of the IAM role that gives EKS
 	// permission to make API calls
@@ -68,8 +62,6 @@ type EncryptionConfig struct {
 
 // EksControlPlaneStatus defines the observed state of EksControlPlane
 type EksControlPlaneStatus struct {
-	Network infrav1.Network `json:"network,omitempty"`
-
 	// Initialized denotes whether or not the control plane has the
 	// uploaded kubeadm-config configmap.
 	// +kubebuilder:default=false

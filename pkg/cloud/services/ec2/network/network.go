@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/awserrors"
 )
 
-// ReconcileNetwork reconciles the network of the given cluster.
+// ReconcileNetwork reconciles the network of the given cluster (unmanaged).
 func (s *Service) ReconcileNetwork() (err error) {
 	s.scope.V(2).Info("Reconciling network for cluster", "cluster-name", s.scope.Cluster.Name, "cluster-namespace", s.scope.Cluster.Namespace)
 
@@ -30,7 +30,7 @@ func (s *Service) ReconcileNetwork() (err error) {
 	}
 
 	// Subnets.
-	if err := s.reconcileSubnets(); err != nil {
+	if err := s.reconcileSubnets(s.simplePublicPrivateSubnets); err != nil {
 		return err
 	}
 
@@ -55,6 +55,37 @@ func (s *Service) ReconcileNetwork() (err error) {
 	}
 
 	s.scope.V(2).Info("Reconcile network completed successfully")
+	return nil
+}
+
+func (s *Service) ReconcileManagedNetwork() (err error) {
+	s.scope.V(2).Info("Reconciling network for managed cluster", "cluster-name", s.scope.Cluster.Name, "cluster-namespace", s.scope.Cluster.Namespace)
+
+	// VPC.
+	if err := s.reconcileVPC(); err != nil {
+		return err
+	}
+
+	// Subnets.
+	if err := s.reconcileSubnets(s.multiAZPublicPrivateSubnets); err != nil {
+		return err
+	}
+
+	// Internet Gateways.
+	if err := s.reconcileInternetGateways(); err != nil {
+		return err
+	}
+
+	// NAT Gateways.
+	if err := s.reconcileNatGateways(); err != nil {
+		return err
+	}
+
+	// Routing tables.
+	//if err := s.reconcileRouteTables(); err != nil {
+	//	return err
+	//}
+
 	return nil
 }
 
