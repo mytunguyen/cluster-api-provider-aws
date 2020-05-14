@@ -18,7 +18,9 @@ package scope
 
 import (
 	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
+	"github.com/aws/aws-sdk-go/service/eks/eksiface"
 	"github.com/aws/aws-sdk-go/service/elb/elbiface"
+	"github.com/aws/aws-sdk-go/service/iam/iamiface"
 	"github.com/aws/aws-sdk-go/service/resourcegroupstaggingapi/resourcegroupstaggingapiiface"
 	"github.com/aws/aws-sdk-go/service/secretsmanager/secretsmanageriface"
 )
@@ -27,6 +29,8 @@ import (
 type AWSClients struct {
 	EC2             ec2iface.EC2API
 	ELB             elbiface.ELBAPI
+	EKS             eksiface.EKSAPI
+	IAM             iamiface.IAMAPI
 	SecretsManager  secretsmanageriface.SecretsManagerAPI
 	ResourceTagging resourcegroupstaggingapiiface.ResourceGroupsTaggingAPIAPI
 }

@@ -7,7 +7,8 @@ require (
 	github.com/awslabs/goformation/v4 v4.8.0
 	github.com/go-logr/logr v0.1.0
 	github.com/golang/mock v1.4.3
-	github.com/onsi/ginkgo v1.12.2
+	github.com/google/uuid v1.1.1
+	github.com/onsi/ginkgo v1.13.0
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
 	github.com/sergi/go-diff v1.0.0
@@ -18,6 +19,7 @@ require (
 	k8s.io/api v0.17.7
 	k8s.io/apimachinery v0.17.7
 	k8s.io/client-go v0.17.7
+	k8s.io/component-base v0.17.7
 	k8s.io/klog v1.0.0
 	k8s.io/utils v0.0.0-20200603063816-c1c6865ac451
 	sigs.k8s.io/cluster-api v0.3.7-alpha.0.0.20200629143729-ef2b61f7d491

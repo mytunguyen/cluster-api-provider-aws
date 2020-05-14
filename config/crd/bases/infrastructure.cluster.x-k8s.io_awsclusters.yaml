@@ -495,7 +495,8 @@ spec:
                 type: object
               controlPlaneLoadBalancer:
                 description: ControlPlaneLoadBalancer is optional configuration for
-                  customizing control plane behavior
+                  customizing control plane behavior. This is ignored for Managed
+                  clusters (EKS)
                 properties:
                   crossZoneLoadBalancing:
                     description: "CrossZoneLoadBalancing enables the classic ELB cross
