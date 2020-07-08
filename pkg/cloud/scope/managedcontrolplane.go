@@ -20,12 +20,9 @@ import (
 	"context"
 
 	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/eks"
-	"github.com/aws/aws-sdk-go/service/elb"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/resourcegroupstaggingapi"
-	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	"k8s.io/klog/klogr"
@@ -40,11 +37,11 @@ import (
 // ManagedControlPlaneScopeParams defines the input parameters used to create a new Scope.
 type ManagedControlPlaneScopeParams struct {
 	AWSClients
-	Client       client.Client
-	Logger       logr.Logger
-	Cluster      *clusterv1.Cluster
-	AWSCluster   *infrav1.AWSCluster
-	ControlPlane *infrav1exp.AWSManagedControlPlane
+	Client            client.Client
+	Logger            logr.Logger
+	Cluster           *clusterv1.Cluster
+	AWSManagedCluster *infrav1exp.AWSManagedCluster
+	ControlPlane      *infrav1exp.AWSManagedControlPlane
 }
 
 // NewManagedControlPlaneScope creates a new Scope from the supplied parameters.
@@ -53,8 +50,8 @@ func NewManagedControlPlaneScope(params ManagedControlPlaneScopeParams) (*Manage
 	if params.Cluster == nil {
 		return nil, errors.New("failed to generate new scope from nil Cluster")
 	}
-	if params.AWSCluster == nil {
-		return nil, errors.New("failed to generate new scope from nil AWSCluster")
+	if params.AWSManagedCluster == nil {
+		return nil, errors.New("failed to generate new scope from nil AWSManagedCluster")
 	}
 	if params.ControlPlane == nil {
 		return nil, errors.New("failed to generate new scope from nil EKSControlPlane")
@@ -63,7 +60,7 @@ func NewManagedControlPlaneScope(params ManagedControlPlaneScopeParams) (*Manage
 		params.Logger = klogr.New()
 	}
 
-	session, err := sessionForRegion(params.AWSCluster.Spec.Region)
+	session, err := sessionForRegion(params.AWSManagedCluster.Spec.Region)
 	if err != nil {
 		return nil, errors.Errorf("failed to create aws session: %v", err)
 	}
@@ -71,20 +68,6 @@ func NewManagedControlPlaneScope(params ManagedControlPlaneScopeParams) (*Manage
 	userAgentHandler := request.NamedHandler{
 		Name: "capa/user-agent",
 		Fn:   request.MakeAddToUserAgentHandler("eks.control-plane.cluster.x-k8s.io", version.Get().String()),
-	}
-
-	if params.AWSClients.EC2 == nil {
-		ec2Client := ec2.New(session)
-		ec2Client.Handlers.Build.PushFrontNamed(userAgentHandler)
-		ec2Client.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.ControlPlane))
-		params.AWSClients.EC2 = ec2Client
-	}
-
-	if params.AWSClients.ELB == nil {
-		elbClient := elb.New(session)
-		elbClient.Handlers.Build.PushFrontNamed(userAgentHandler)
-		elbClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.ControlPlane))
-		params.AWSClients.ELB = elbClient
 	}
 
 	if params.AWSClients.EKS == nil {
@@ -107,25 +90,19 @@ func NewManagedControlPlaneScope(params ManagedControlPlaneScopeParams) (*Manage
 		params.AWSClients.ResourceTagging = resourceTagging
 	}
 
-	if params.AWSClients.SecretsManager == nil {
-		sClient := secretsmanager.New(session)
-		sClient.Handlers.Complete.PushBack(recordAWSPermissionsIssue(params.ControlPlane))
-		params.AWSClients.SecretsManager = sClient
-	}
-
 	helper, err := patch.NewHelper(params.ControlPlane, params.Client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init patch helper")
 	}
 
 	return &ManagedControlPlaneScope{
-		Logger:       params.Logger,
-		Client:       params.Client,
-		AWSClients:   params.AWSClients,
-		Cluster:      params.Cluster,
-		AWSCluster:   params.AWSCluster,
-		ControlPlane: params.ControlPlane,
-		patchHelper:  helper,
+		Logger:            params.Logger,
+		Client:            params.Client,
+		AWSClients:        params.AWSClients,
+		Cluster:           params.Cluster,
+		AWSManagedCluster: params.AWSManagedCluster,
+		ControlPlane:      params.ControlPlane,
+		patchHelper:       helper,
 	}, nil
 }
 
@@ -136,29 +113,29 @@ type ManagedControlPlaneScope struct {
 	patchHelper *patch.Helper
 
 	AWSClients
-	Cluster      *clusterv1.Cluster
-	AWSCluster   *infrav1.AWSCluster
-	ControlPlane *infrav1exp.AWSManagedControlPlane
+	Cluster           *clusterv1.Cluster
+	AWSManagedCluster *infrav1exp.AWSManagedCluster
+	ControlPlane      *infrav1exp.AWSManagedControlPlane
 }
 
 // Network returns the control plane network object.
 func (s *ManagedControlPlaneScope) Network() *infrav1.Network {
-	return &s.AWSCluster.Status.Network
+	return &s.AWSManagedCluster.Status.Network
 }
 
 // VPC returns the control plane VPC.
 func (s *ManagedControlPlaneScope) VPC() *infrav1.VPCSpec {
-	return &s.AWSCluster.Spec.NetworkSpec.VPC
+	return &s.AWSManagedCluster.Spec.NetworkSpec.VPC
 }
 
 // Subnets returns the control plane subnets.
 func (s *ManagedControlPlaneScope) Subnets() infrav1.Subnets {
-	return s.AWSCluster.Spec.NetworkSpec.Subnets
+	return s.AWSManagedCluster.Spec.NetworkSpec.Subnets
 }
 
 // SecurityGroups returns the control plane security groups as a map, it creates the map if empty.
 func (s *ManagedControlPlaneScope) SecurityGroups() map[infrav1.SecurityGroupRole]infrav1.SecurityGroup {
-	return s.AWSCluster.Status.Network.SecurityGroups
+	return s.AWSManagedCluster.Status.Network.SecurityGroups
 }
 
 // Name returns the cluster name.
@@ -173,7 +150,7 @@ func (s *ManagedControlPlaneScope) Namespace() string {
 
 // Region returns the cluster region.
 func (s *ManagedControlPlaneScope) Region() string {
-	return s.AWSCluster.Spec.Region
+	return s.AWSManagedCluster.Spec.Region
 }
 
 // ListOptionsLabelSelector returns a ListOptions with a label selector for clusterName.
@@ -195,9 +172,9 @@ func (s *ManagedControlPlaneScope) Close() error {
 
 // AdditionalTags returns AdditionalTags from the scope's EksControlPlane. The returned value will never be nil.
 func (s *ManagedControlPlaneScope) AdditionalTags() infrav1.Tags {
-	if s.AWSCluster.Spec.AdditionalTags == nil {
-		s.AWSCluster.Spec.AdditionalTags = infrav1.Tags{}
+	if s.AWSManagedCluster.Spec.AdditionalTags == nil {
+		s.AWSManagedCluster.Spec.AdditionalTags = infrav1.Tags{}
 	}
 
-	return s.AWSCluster.Spec.AdditionalTags.DeepCopy()
+	return s.AWSManagedCluster.Spec.AdditionalTags.DeepCopy()
 }

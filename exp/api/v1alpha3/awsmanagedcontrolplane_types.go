@@ -80,7 +80,7 @@ type EncryptionConfig struct {
 // AWSManagedControlPlaneStatus defines the observed state of AWSManagedControlPlane
 type AWSManagedControlPlaneStatus struct {
 	// Initialized denotes whether or not the control plane has the
-	// uploaded kubeadm-config configmap.
+	// uploaded eks-config configmap.
 	// +kubebuilder:default=false
 	Initialized bool `json:"initialized"`
 

@@ -23,6 +23,12 @@ import (
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
 )
 
+const (
+	// ManagedClusterFinalizer allows ReconcileAWSManagedCluster to clean up AWS resources associated with AWSManagedCluster before
+	// removing it from the apiserver.
+	ManagedClusterFinalizer = "awsmanagedcluster.exp.infrastructure.cluster.x-k8s.io"
+)
+
 // AWSManagedClusterSpec defines the desired state of AWSManagedCluster
 type AWSManagedClusterSpec struct {
 	// NetworkSpec encapsulates all things related to AWS network.
@@ -43,13 +49,27 @@ type AWSManagedClusterSpec struct {
 	// ones added by default.
 	// +optional
 	AdditionalTags infrav1.Tags `json:"additionalTags,omitempty"`
+
+	// Bastion contains options to configure the bastion host.
+	// +optional
+	Bastion infrav1.Bastion `json:"bastion"`
 }
 
 // AWSManagedClusterStatus defines the observed state of AWSManagedCluster
 type AWSManagedClusterStatus struct {
-	// Ready is true when the provider resource is ready.
+	// Ready is true when the provider resources are ready and also
+	// the aws managed control plane has a API server URL .
 	// +optional
 	Ready bool `json:"ready,omitempty"`
+
+	// Initialized is true when the cluster infrastructure has been created. This will be true
+	// before the EKS control plane is ready and is used to signal
+	// that its safe for the AWSManagedControlPlane to be reconciled.
+	Initialized bool `json:"initialized,omitempty"`
+
+	Network        infrav1.Network          `json:"network,omitempty"`
+	FailureDomains clusterv1.FailureDomains `json:"failureDomains,omitempty"`
+	Bastion        *infrav1.Instance        `json:"bastion,omitempty"`
 }
 
 // +kubebuilder:object:root=true

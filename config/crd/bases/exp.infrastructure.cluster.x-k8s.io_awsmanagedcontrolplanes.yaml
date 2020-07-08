@@ -156,11 +156,11 @@ spec:
               initialized:
                 default: false
                 description: Initialized denotes whether or not the control plane
-                  has the uploaded kubeadm-config configmap.
+                  has the uploaded eks-config configmap.
                 type: boolean
               ready:
                 default: false
-                description: Ready denotes that the KubeadmControlPlane API Server
+                description: Ready denotes that the AWSManagedControlPlane API Server
                   is ready to receive requests.
                 type: boolean
             required:

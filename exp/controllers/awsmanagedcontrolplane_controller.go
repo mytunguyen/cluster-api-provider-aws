@@ -127,23 +127,24 @@ func (r *AWSManagedControlPlaneReconciler) Reconcile(req ctrl.Request) (res ctrl
 		return ctrl.Result{}, nil
 	}
 
-	awsCluster := &infrav1.AWSCluster{}
-	awsClusterRef := types.NamespacedName{
+	//TODO: wait for the AWsManagedCluster to be initialized
+	awsManagedCluster := &infrav1exp.AWSManagedCluster{}
+	awsManagedClusterRef := types.NamespacedName{
 		Name:      cluster.Spec.InfrastructureRef.Name,
 		Namespace: cluster.Spec.InfrastructureRef.Namespace,
 	}
-	if err := r.Get(ctx, awsClusterRef, awsCluster); err != nil {
-		return reconcile.Result{}, errors.Wrap(err, "failed to get AWSCluster")
+	if err := r.Get(ctx, awsManagedClusterRef, awsManagedCluster); err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to get AWSManagedCluster")
 	}
 
 	logger = logger.WithValues("cluster", cluster.Name)
 
 	managedScope, err := scope.NewManagedControlPlaneScope(scope.ManagedControlPlaneScopeParams{
-		Client:       r.Client,
-		Logger:       logger,
-		Cluster:      cluster,
-		AWSCluster:   awsCluster,
-		ControlPlane: awsControlPlane,
+		Client:            r.Client,
+		Logger:            logger,
+		Cluster:           cluster,
+		AWSManagedCluster: awsManagedCluster,
+		ControlPlane:      awsControlPlane,
 	})
 	if err != nil {
 		return reconcile.Result{}, errors.Errorf("failed to create scope: %+v", err)

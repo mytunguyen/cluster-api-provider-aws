@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/klogr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-aws/exp/api/v1alpha3"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/record"
 	"sigs.k8s.io/cluster-api-provider-aws/version"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
@@ -237,13 +236,4 @@ func (s *ClusterScope) SetFailureDomain(id string, spec clusterv1.FailureDomainS
 		s.AWSCluster.Status.FailureDomains = make(clusterv1.FailureDomains)
 	}
 	s.AWSCluster.Status.FailureDomains[id] = spec
-}
-
-// IsManagedControlPlaneOwned retuns true if the cluster has a EKS control plane
-func (s *ClusterScope) IsManagedControlPlaneOwned() bool {
-	ref := s.Cluster.Spec.ControlPlaneRef
-	if ref.Kind == "AWSManagedControlPlane" && ref.APIVersion == infrav1exp.GroupVersion.String() {
-		return true
-	}
-	return false
 }

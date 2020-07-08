@@ -117,9 +117,12 @@ func (s *Service) deleteClusterAndWait(cluster *eks.Cluster) error {
 }
 
 func (s *Service) updateCluster(cluster *eks.Cluster) (*eks.Cluster, error) {
-	updateInput := &eks.UpdateClusterConfigInput{
-		Name: cluster.Name
-	}
+	//updateInput := &eks.UpdateClusterConfigInput{
+	//	Name: cluster.Name,
+	//}
+
+	//TODO: finish this
+	return nil, nil
 }
 
 func (s *Service) createCluster() (*eks.Cluster, error) {
@@ -173,7 +176,6 @@ func (s *Service) createCluster() (*eks.Cluster, error) {
 
 	var out *eks.CreateClusterOutput
 	if err := wait.WaitForWithRetryable(wait.NewBackoff(), func() (bool, error) {
-		s.scope.EKS.UpdateClusterConfig()
 		if out, err = s.scope.EKS.CreateCluster(input); err != nil {
 			if aerr, ok := err.(awserr.Error); ok {
 				return false, aerr
