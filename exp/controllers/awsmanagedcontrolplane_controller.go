@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -58,6 +59,12 @@ func (r *AWSManagedControlPlaneReconciler) SetupWithManager(mgr ctrl.Manager, op
 		For(&infrav1exp.AWSManagedControlPlane{}).
 		WithOptions(options).
 		WithEventFilter(predicates.ResourceNotPaused(r.Log)).
+		Watches(
+			&source.Kind{Type: &infrav1.AWSCluster{}},
+			&handler.EnqueueRequestsFromMapFunc{
+				ToRequests: handler.ToRequestsFunc(r.AWSClusterToAWSManagedControlPlane),
+			},
+		).
 		Build(r)
 
 	if err != nil {
@@ -211,4 +218,42 @@ func (r *AWSManagedControlPlaneReconciler) ClusterToAWSManagedControlPlane(o han
 	}
 
 	return nil
+}
+
+// AWSClusterToAWSManagedControlPlane is a handler.ToRequestFunc to be used to enqueue requests for reconciliatio
+// for AWSManagedControlPlane based on updates to a Cluster
+func (r *AWSManagedControlPlaneReconciler) AWSClusterToAWSManagedControlPlane(o handler.MapObject) []ctrl.Request {
+	ctx, cancel := context.WithTimeout(context.Background(), reconciler.DefaultMappingTimeout)
+	defer cancel()
+
+	awsCluster, ok := o.Object.(*infrav1.AWSCluster)
+	if !ok {
+		r.Log.Error(nil, fmt.Sprintf("Expected a Cluster but got a %T", o.Object))
+	}
+
+	if !awsCluster.ObjectMeta.DeletionTimestamp.IsZero() {
+		r.Log.V(4).Info("AWSCluster has a delation timestamp, skipping mapping")
+		return nil
+	}
+
+	cluster, err := util.GetOwnerCluster(ctx, r.Client, awsCluster.ObjectMeta)
+	if err != nil {
+		r.Log.Error(err, "failed to get owning cluster")
+		return nil
+	}
+
+	controlPlaneRef := cluster.Spec.ControlPlaneRef
+	if controlPlaneRef == nil || controlPlaneRef.Kind == "AWSManagedControlPlane" {
+		r.Log.V(4).Info("ControlPlaneRef is nil or not AWSManagedControlPlane, skipping mapping")
+		return nil
+	}
+
+	return []ctrl.Request{
+		{
+			NamespacedName: types.NamespacedName{
+				Name:      controlPlaneRef.Name,
+				Namespace: controlPlaneRef.Namespace,
+			},
+		},
+	}
 }

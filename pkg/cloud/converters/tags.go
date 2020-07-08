@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/elb"
+	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	infrav1 "sigs.k8s.io/cluster-api-provider-aws/api/v1alpha3"
 )
@@ -89,6 +90,33 @@ func MapToSecretsManagerTags(src infrav1.Tags) []*secretsmanager.Tag {
 		}
 
 		tags = append(tags, tag)
+	}
+
+	return tags
+}
+
+// MapToIAMTags converts a infrav1.Tags to a []*iam.Tag
+func MapToIAMTags(src infrav1.Tags) []*iam.Tag {
+	tags := make([]*iam.Tag, 0, len(src))
+
+	for k, v := range src {
+		tag := &iam.Tag{
+			Key:   aws.String(k),
+			Value: aws.String(v),
+		}
+
+		tags = append(tags, tag)
+	}
+
+	return tags
+}
+
+// IAMTagsToMap converts a []*iam.Tag into a infrav1.Tags.
+func IAMTagsToMap(src []*iam.Tag) infrav1.Tags {
+	tags := make(infrav1.Tags, len(src))
+
+	for _, t := range src {
+		tags[*t.Key] = *t.Value
 	}
 
 	return tags

@@ -50,6 +50,7 @@ func (s *Service) reconcileCluster(ctx context.Context) error {
 		s.scope.Info("Created EKS control plane: %s", *cluster.Name)
 	} else {
 		s.scope.V(2).Info("Found EKS control plane: %s", *cluster.Name)
+		//TODO: handler update
 	}
 
 	cluster, err = s.waitForClusterActive()
@@ -115,6 +116,12 @@ func (s *Service) deleteClusterAndWait(cluster *eks.Cluster) error {
 	return nil
 }
 
+func (s *Service) updateCluster(cluster *eks.Cluster) (*eks.Cluster, error) {
+	updateInput := &eks.UpdateClusterConfigInput{
+		Name: cluster.Name
+	}
+}
+
 func (s *Service) createCluster() (*eks.Cluster, error) {
 	// TODO: Do we need to just add the private subnets?
 	subnets := s.scope.Subnets()
@@ -166,6 +173,7 @@ func (s *Service) createCluster() (*eks.Cluster, error) {
 
 	var out *eks.CreateClusterOutput
 	if err := wait.WaitForWithRetryable(wait.NewBackoff(), func() (bool, error) {
+		s.scope.EKS.UpdateClusterConfig()
 		if out, err = s.scope.EKS.CreateCluster(input); err != nil {
 			if aerr, ok := err.(awserr.Error); ok {
 				return false, aerr
