@@ -182,7 +182,7 @@ func (s *Service) ensurePoliciesAttached(role *iam.Role, policies []*string) err
 			if err != nil {
 				return err
 			}
-			s.scope.V(2).Info("Detatched policy from role", "role", role.RoleName, "policy", existingPolicy)
+			s.scope.V(2).Info("Detached policy from role", "role", role.RoleName, "policy", existingPolicy)
 		}
 	}
 

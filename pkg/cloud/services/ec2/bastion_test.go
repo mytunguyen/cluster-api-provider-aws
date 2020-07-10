@@ -168,9 +168,6 @@ func TestDeleteBastion(t *testing.T) {
 				ec2Mock := mock_ec2iface.NewMockEC2API(mockControl)
 
 				scope, err := scope.NewClusterScope(scope.ClusterScopeParams{
-					AWSClients: scope.AWSClients{
-						EC2: ec2Mock,
-					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
 							Namespace: "ns",
@@ -190,13 +187,14 @@ func TestDeleteBastion(t *testing.T) {
 				g.Expect(err).To(BeNil())
 
 				if managed {
-					scope.AWSCluster.Spec.NetworkSpec.VPC.Tags = infrav1.Tags{
+					scope.VPC().Tags = infrav1.Tags{
 						infrav1.ClusterTagKey(clusterName): string(infrav1.ResourceLifecycleOwned),
 					}
 				}
 
 				tc.expect(ec2Mock.EXPECT())
 				s := NewService(scope)
+				s.EC2Client = ec2Mock
 
 				err = s.DeleteBastion()
 				if tc.expectError {

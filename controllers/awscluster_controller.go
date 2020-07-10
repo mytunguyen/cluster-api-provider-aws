@@ -118,7 +118,7 @@ func (r *AWSClusterReconciler) reconcileDelete(clusterScope *scope.ClusterScope)
 
 	ec2svc := ec2.NewService(clusterScope)
 	elbsvc := elb.NewService(clusterScope)
-	awsCluster := clusterScope.AWSCluster
+	awsCluster := clusterScope.InfraCluster().(*infrav1.AWSCluster)
 
 	if err := elbsvc.DeleteLoadbalancers(); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "error deleting load balancer for AWSCluster %s/%s", awsCluster.Namespace, awsCluster.Name)
@@ -133,7 +133,7 @@ func (r *AWSClusterReconciler) reconcileDelete(clusterScope *scope.ClusterScope)
 	}
 
 	// Cluster is deleted so remove the finalizer.
-	controllerutil.RemoveFinalizer(clusterScope.AWSCluster, infrav1.ClusterFinalizer)
+	controllerutil.RemoveFinalizer(awsCluster, infrav1.ClusterFinalizer)
 
 	return reconcile.Result{}, nil
 }
@@ -142,7 +142,7 @@ func (r *AWSClusterReconciler) reconcileDelete(clusterScope *scope.ClusterScope)
 func (r *AWSClusterReconciler) reconcileNormal(ctx context.Context, clusterScope *scope.ClusterScope) (reconcile.Result, error) {
 	clusterScope.Info("Reconciling AWSCluster")
 
-	awsCluster := clusterScope.AWSCluster
+	awsCluster := clusterScope.InfraCluster().(*infrav1.AWSCluster)
 
 	// If the AWSCluster doesn't have our finalizer, add it.
 	controllerutil.AddFinalizer(awsCluster, infrav1.ClusterFinalizer)

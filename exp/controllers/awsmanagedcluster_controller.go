@@ -37,7 +37,6 @@ import (
 	infrav1exp "sigs.k8s.io/cluster-api-provider-aws/exp/api/v1alpha3"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/scope"
 	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/services/ec2"
-	"sigs.k8s.io/cluster-api-provider-aws/pkg/cloud/services/elb"
 )
 
 // AWSManagedClusterReconciler reconciles AWSManagedCluster
@@ -132,7 +131,7 @@ func (r *AWSManagedClusterReconciler) Reconcile(req ctrl.Request) (_ ctrl.Result
 func (r *AWSManagedClusterReconciler) reconcileNormal(ctx context.Context, managedClusterScope *scope.ManagedClusterScope) (reconcile.Result, error) {
 	managedClusterScope.Info("Reconciling AWSManagedCluster")
 
-	awsManagedCluster := managedClusterScope.AWSManagedCluster
+	awsManagedCluster := managedClusterScope.InfraCluster().(*infrav1exp.AWSManagedCluster)
 
 	// If the AWSManagedCluster doesn't have our finalizer, add it.
 	controllerutil.AddFinalizer(awsManagedCluster, infrav1exp.ManagedClusterFinalizer)
@@ -142,7 +141,6 @@ func (r *AWSManagedClusterReconciler) reconcileNormal(ctx context.Context, manag
 	}
 
 	ec2Service := ec2.NewService(managedClusterScope)
-	elbService := elb.NewService(managedClusterScope)
 
 	if err := ec2Service.ReconcileNetwork(); err != nil {
 		return reconcile.Result{}, errors.Wrapf(err, "failed to reconcile network for AWSManagedCluster %s/%s", awsManagedCluster.Namespace, awsManagedCluster.Name)
@@ -162,11 +160,11 @@ func (r *AWSManagedClusterReconciler) reconcileNormal(ctx context.Context, manag
 	awsManagedCluster.Status.Initialized = true
 
 	// Check the control plane and see if we are ready
-	controlPlane := managedClusterScope.Controlplane
+	controlPlane := managedClusterScope.ControlPlane()
 	if controlPlane.Status.Ready {
-		awsManagedCluster.Spec.ControlPlaneEndpoint = managedClusterScope.Controlplane.Spec.ControlPlaneEndpoint
+		awsManagedCluster.Spec.ControlPlaneEndpoint = awsManagedCluster.Spec.ControlPlaneEndpoint.DeepCopy()
 		if awsManagedCluster.Spec.ControlPlaneEndpoint != nil {
-			awsCluster.Status.Ready = true
+			awsManagedCluster.Status.Ready = true
 		}
 	}
 
@@ -177,8 +175,7 @@ func (r *AWSManagedClusterReconciler) reconcileDelete(managedClusterScope *scope
 	managedClusterScope.Info("Reconciling AWSManagedCluster delete")
 
 	ec2svc := ec2.NewService(managedClusterScope)
-	elbsvc := elb.NewService(managedClusterScope)
-	awsManagedCluster := managedClusterScope.AWSManagedCluster
+	awsManagedCluster := managedClusterScope.InfraCluster().(*infrav1exp.AWSManagedCluster)
 
 	//TODO: check that the Controlplane is deleted first
 
@@ -191,7 +188,7 @@ func (r *AWSManagedClusterReconciler) reconcileDelete(managedClusterScope *scope
 	}
 
 	// Cluster is deleted so remove the finalizer.
-	controllerutil.RemoveFinalizer(managedClusterScope.AWSManagedCluster, infrav1exp.ManagedClusterFinalizer)
+	controllerutil.RemoveFinalizer(awsManagedCluster, infrav1exp.ManagedClusterFinalizer)
 
 	return reconcile.Result{}, nil
 }

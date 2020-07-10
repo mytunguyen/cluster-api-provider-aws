@@ -22,7 +22,7 @@ import (
 
 // ReconcileNetwork reconciles the network of the given cluster.
 func (s *Service) ReconcileNetwork() (err error) {
-	s.scope.V(2).Info("Reconciling network for cluster", "cluster-name", s.scope.Cluster.Name, "cluster-namespace", s.scope.Cluster.Namespace)
+	s.scope.V(2).Info("Reconciling network for cluster", "cluster-name", s.scope.Name(), "cluster-namespace", s.scope.Namespace())
 
 	// VPC.
 	if err := s.reconcileVPC(); err != nil {

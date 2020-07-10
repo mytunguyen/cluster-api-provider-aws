@@ -192,7 +192,7 @@ func (r *AWSManagedControlPlaneReconciler) reconcileDelete(ctx context.Context, 
 	controlPlane := managedScope.ControlPlane
 
 	if err := ekssvc.DeleteControlPlane(); err != nil {
-		return reconcile.Result{}, errors.Wrapf(err, "error deleteing EKS cluster for EKS control plane %s/%s", managedScope.Namespace, managedScope.Name)
+		return reconcile.Result{}, errors.Wrapf(err, "error deleting EKS cluster for EKS control plane %s/%s", managedScope.Namespace(), managedScope.Name())
 	}
 
 	controllerutil.RemoveFinalizer(controlPlane, infrav1exp.EKSControlPlaneFinalizer)

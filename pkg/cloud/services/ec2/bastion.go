@@ -37,7 +37,7 @@ const (
 // ReconcileBastion ensures a bastion is created for the cluster
 func (s *Service) ReconcileBastion() error {
 
-	if !s.scope.AWSCluster.Spec.Bastion.Enabled {
+	if !s.scope.Bastion().Enabled {
 		s.scope.V(4).Info("Skipping bastion reconcile")
 		_, err := s.describeBastionInstance()
 		if err != nil {
@@ -66,11 +66,11 @@ func (s *Service) ReconcileBastion() error {
 	if awserrors.IsNotFound(err) {
 		instance, err = s.runInstance("bastion", spec)
 		if err != nil {
-			record.Warnf(s.scope.AWSCluster, "FailedCreateBastion", "Failed to create bastion instance: %v", err)
+			record.Warnf(s.scope.InfraCluster(), "FailedCreateBastion", "Failed to create bastion instance: %v", err)
 			return err
 		}
 
-		record.Eventf(s.scope.AWSCluster, "SuccessfulCreateBastion", "Created bastion instance %q", instance.ID)
+		record.Eventf(s.scope.InfraCluster(), "SuccessfulCreateBastion", "Created bastion instance %q", instance.ID)
 		s.scope.V(2).Info("Created new bastion host", "instance", instance)
 
 	} else if err != nil {
@@ -79,7 +79,7 @@ func (s *Service) ReconcileBastion() error {
 
 	// TODO(vincepri): check for possible changes between the default spec and the instance.
 
-	s.scope.AWSCluster.Status.Bastion = instance.DeepCopy()
+	s.scope.SetBastionInstance(instance.DeepCopy())
 	s.scope.V(2).Info("Reconcile bastion completed successfully")
 
 	return nil
@@ -97,10 +97,10 @@ func (s *Service) DeleteBastion() error {
 	}
 
 	if err := s.TerminateInstanceAndWait(instance.ID); err != nil {
-		record.Warnf(s.scope.AWSCluster, "FailedTerminateBastion", "Failed to terminate bastion instance %q: %v", instance.ID, err)
+		record.Warnf(s.scope.InfraCluster(), "FailedTerminateBastion", "Failed to terminate bastion instance %q: %v", instance.ID, err)
 		return errors.Wrap(err, "unable to delete bastion instance")
 	}
-	record.Eventf(s.scope.AWSCluster, "SuccessfulTerminateBastion", "Terminated bastion instance %q", instance.ID)
+	record.Eventf(s.scope.InfraCluster(), "SuccessfulTerminateBastion", "Terminated bastion instance %q", instance.ID)
 
 	return nil
 }
@@ -119,9 +119,9 @@ func (s *Service) describeBastionInstance() (*infrav1.Instance, error) {
 		},
 	}
 
-	out, err := s.scope.EC2.DescribeInstances(input)
+	out, err := s.EC2Client.DescribeInstances(input)
 	if err != nil {
-		record.Eventf(s.scope.AWSCluster, "FailedDescribeBastionHost", "Failed to describe bastion host: %v", err)
+		record.Eventf(s.scope.InfraCluster(), "FailedDescribeBastionHost", "Failed to describe bastion host: %v", err)
 		return nil, errors.Wrap(err, "failed to describe bastion host")
 	}
 
@@ -143,7 +143,7 @@ func (s *Service) getDefaultBastion() *infrav1.Instance {
 	userData, _ := userdata.NewBastion(&userdata.BastionInput{})
 
 	// If SSHKeyName WAS NOT provided, use the defaultSSHKeyName
-	keyName := s.scope.AWSCluster.Spec.SSHKeyName
+	keyName := s.scope.SSHKeyName()
 	if keyName == nil {
 		keyName = aws.String(defaultSSHKeyName)
 	}
@@ -151,7 +151,7 @@ func (s *Service) getDefaultBastion() *infrav1.Instance {
 	i := &infrav1.Instance{
 		Type:       "t2.micro",
 		SubnetID:   s.scope.Subnets().FilterPublic()[0].ID,
-		ImageID:    s.defaultBastionAMILookup(s.scope.AWSCluster.Spec.Region),
+		ImageID:    s.defaultBastionAMILookup(s.scope.Region()),
 		SSHKeyName: keyName,
 		UserData:   aws.String(base64.StdEncoding.EncodeToString([]byte(userData))),
 		SecurityGroupIDs: []string{
